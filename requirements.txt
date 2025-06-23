@@ -1,0 +1,14 @@
+pydub
+pyaudio
+sounddevice
+faster-whisper
+keyboard
+better_profanity
+langid
+
+
+
+inflect
+transformers
+python-dotenv
+gradio
