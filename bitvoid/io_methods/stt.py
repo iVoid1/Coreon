@@ -6,14 +6,22 @@ import sys
 import sounddevice
 import datetime
 import time
+#TODO: Add support for whisper
+import whisper
 
 
 
 
 
+class STT:
+    """
+    Speech-to-Text (STT) base class.
+    ---
+    This class provides a base for implementing speech-to-text functionality using Vosk or other STT models.
+    It initializes the Vosk model, sets up the microphone input, and provides methods for logging microphone input and recognized speech.
+    It uses the Vosk library for speech recognition and PyAudio for audio input.
 
-class Mic:
-    "Microphone input module using Vosk for speech recognition and sounddevice for audio input."
+    """
 
     def __init__(self, model, sample_rate: int = 16000, chunk: int = 8000, log_file: str = "mic_log.txt"):
         """
@@ -70,14 +78,3 @@ class Mic:
             print("⚠️", status, file=sys.stderr)
         self._q.put(bytes(in_data))
         
-        
-        
-
-if __name__ == "__main__":
-    mic = Mic(model="vosk-model-small-en-us-0.15", sample_rate=16000, chunk=8000, log_file="mic_log.txt")
-    import asyncio
-    async def main():
-        recognized_text = await mic.mic_logger(duration=10)
-        print(f"Final recognized text: {recognized_text}")
-
-    asyncio.run(main())

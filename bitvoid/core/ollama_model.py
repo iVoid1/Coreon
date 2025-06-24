@@ -1,12 +1,10 @@
-import asyncio, aiohttp, requests, json
-from mic import Mic
-from tts import TTS
-from Config import Config
+import aiohttp, requests
+from BitVoid.config.Config import config
 
 
-class Model:
-    def __init__(self, model_name: str = "llama3.1"):
-        self.model_name = model_name
+class OllamaModel:
+    def __init__(self):
+        self.model_name = config.OLLAMA_MODEL
 
     def chat(self, prompt: str) -> str | None:
         """Send a basic synchronous chat request (non-streamed)."""
@@ -59,12 +57,6 @@ class Model:
         except aiohttp.ClientError as e:
             print(f"Ollama (async) connection error: {e}")
             return None
-
-    async def tts_speak(self, text: str) -> None:
-        """Convert text to speech using TTS module."""
-        # TODO: Improve voice selection / support multilingual
-        tts = TTS()
-        await tts.speak(text)
 
     # TODO: Implement streaming support if needed
     # TODO: Add message memory if planning conversation history
