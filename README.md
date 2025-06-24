@@ -46,7 +46,7 @@ This project uses the Vosk speech recognition model, which is not included in th
 }
 ```
 
-🗂️ Project Structure Overview
+## 🗂️ Project Structure Overview
 
 ```
 BitVoid/
