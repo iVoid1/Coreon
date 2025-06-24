@@ -1,28 +1,25 @@
-from io import BytesIO
-import pydub
-from pydub.playback import play
 import edge_tts
+import pydub
+from pydub.playback import play # pydub is a simple and easy-to-use Python library for audio processing
+from io import BytesIO # BytesIO is used to handle byte streams in memory
+#TODO : replace edge-tts with gTTS for better compatibility
+from gtts import gTTS # gTTS is a Google Text-to-Speech library
+
+
+
 
 class TTS:
 
     "Text-to-Speech module using edge-tts and pydub for audio playback."
 
-    def __init__(self):
-        self.voice = "en-US-GuyNeural"
-        self.loading_message = "Loading TTS engine..."
+    def __init__(self, voice: str = "en-US-GuyNeural"):
+        self.voice = voice
+        self.communicator = edge_tts.Communicate(text="", voice=voice)
 
     def set_voice(self, voice: str):
         """Set the voice for TTS."""
         self.voice = voice
-    
-    def clean_text(self, text: str) -> str:
-        """
-        Clean the input text by removing unwanted characters.
-        This is a placeholder for any specific cleaning logic you might want to implement.
-        """
-        # Example cleaning logic: remove extra spaces and newlines
-        text = text.replace("#", " ").replace("**", " ").replace("`", " ")
-        return text
+        self.communicator = edge_tts.Communicate(text="", voice=self.voice)
 
     async def speak(self, text: str, voice: str = "en-US-GuyNeural"):
         # create buffer to hold mp3 data
@@ -30,7 +27,6 @@ class TTS:
 
         # initialize edge-tts communicator
         communicator = edge_tts.Communicate(text, voice=voice)
-
         # stream audio into memory
         async for chunk in communicator.stream():
             if chunk.get("type") == "audio" and "data" in chunk:

@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 
 class Config:
     def __init__(self, config_path="config.json"):
@@ -9,5 +8,5 @@ class Config:
     def __getattr__(self, name):
         return self._data.get(name)
 
-# استخدام:
+
 config = Config()

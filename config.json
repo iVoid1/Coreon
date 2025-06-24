@@ -1,6 +1,0 @@
-{
-    "model_path": "modules/vosk-model-en-us-0.22",
-    "sample_rate": 16000,
-    "chunk": 8000,
-    "log_file": ""
-}

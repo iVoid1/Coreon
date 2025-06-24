@@ -1,9 +1,9 @@
 import asyncio
 
-from mic import Mic
-from tts import TTS
-from Config import config
-from module import Model
+from io_methods.stt import Mic
+from io_methods.tts import TTS
+from data.Config import config
+from model.BitVoid import BitVoid
 
 
 #TODO : Add model selection logic if needed
@@ -29,7 +29,7 @@ class Main:
             log_file=config.LOG_FILE
         )
         self.tts = TTS()
-        self.model = Model(model_name=config.MODEL_NAME)
+        self.model = Model()
         print(f"Using model: {self.model.model_name}")
     async def run(self):
         """
