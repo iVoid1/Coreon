@@ -1,9 +1,0 @@
-{
-    "vosk_model": "assets/vosk-model-en-us-0.22",
-    "sample_rate": 16000,
-    "chunk": 8000,
-    "log_file": "",
-    "ollama_model": "llama3.1",
-    "ollama_url": "http://localhost:11434",
-    "ollama_post": "http://localhost:11434/api/chat"
-}

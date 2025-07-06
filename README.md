@@ -1,90 +1,52 @@
-# 🧠 BitVoid — Personal Voice Assistant (Prototype)
+# 🧠 Coreon —  Assistant (Prototype)
 
-BitVoid is a personal AI-driven voice assistant prototype designed to simulate real-time conversations with a local Large Language Model (LLM) using voice input and output.
+Coreon is a personal AI-driven voice assistant prototype designed to simulate real-time conversations with a local Large Language Model (LLM).
 
-## 🎯 Current Progress
+## 🎯 Current Progress Summary
 
-- [X]  🎙️ Speech-to-Text (STT) implemented using [Vosk] for accurate offline speech recognition.
-- [X]  🗣️ Text-to-Speech (TTS) functionality implemented leveraging [Edge-TTS] for natural voice output.
-- [X]  🤖 Local LLM Integration through [Ollama] running models like LLaMA 3.1 on your local machine.
-- [X]  🔄 Basic asynchronous interactive loop prototype connecting speech input, AI processing, and voice output.
-- [X]  🗂️ Organized project structure with modular design separating core logic, I/O methods, memory management, and model interface.
-- [ ]  🧠 Simple memory manager implemented for storing and retrieving conversational context.
-- [ ]  💾 Automatic message logging with timestamps (planned).
-- [ ]  🧩 Advanced personalization and dynamic learning modules (planned).
-- [ ]  🔧 Robust error handling and full async concurrency enhancements (planned).
-- [ ]  📦 Dependencies
+### ✅ Completed
 
-Install required packages:
+* **Local LLM Integration** using [Ollama] (LLaMA 3.1 or other models).
+* **Basic architecture and modular project structure**:
+  * `core/`: Logic (e.g., ollama model interface)
+  * `data/`: Database models
+  * `utils/`: Helpers (e.g., logger)
+* **Database design finalized and implemented**:
+  * `session`, `conversation`, `embedding`, `reference`, `memory`
+  * Proper foreign key relations and cascade behavior in place
+* **Basic chat logic with logging and session creation**
 
-### `pip install -r requirements.txt`
+### 🛠 In Progress
 
----
+* **Refactor `ollama_model.py`**:
+  * Separate model communication logic
+  * Clean, structured sync/async methods
+  * Remove unrelated responsibilities (only chat and generation logic should live here)
+* **Design and implement `reference/` package**:
+  * `reference_management.py`: Orchestrator
+  * `reference.py`: Data class for reference item
+  * `search_query.py`: Represents a search operation metadata
 
-## ⚠️ Required Model Download (at lease for now)
+### ⏸ On Hold
 
-This project uses the Vosk speech recognition model, which is not included in the repository due to its large size.
-📥 How to Set Up the Model
+* **Config system (`config/`)**:
+  * Current usage paused until needed (e.g., dynamic model loading, user preferences)
 
-1. Download an English model from the official Vosk website: [Vosk](
+### 🚧 Planned (Next Phase)
 
-- ✅ Recommended for high accuracy: vosk-model-en-us-0.22
-- 🟢 Smaller and faster: vosk-model-small-en-us-0.15
+* **Implement memory logic (`memory_management.py`)**
+  * Store recent dialogue context
+  * Retrieve conversation windows for embedding and continuity
+* **Use database actively in flow:**
+  * Embed user prompts and assistant replies
+  * Log related references and search actions
+* **Add reference-aware generation**
+  * If user asks a question → check if info exists in `reference`
+  * Else → auto-search, summarize, store
 
-2. Extract the downloaded model into your project directory.
-3. Open the config.json file in config folder and update the `vosk_model` field to match the folder name:
+## ✍ Notes
 
-```json
-{
-    "vosk_model": "assets/vosk-model-en-us-0.22", <-- that's what you need to update
-    "sample_rate": 16000,
-    "chunk": 8000,
-    "log_file": "",
-    "ollama_model": "llama3.1",
-    "ollama_url": "http://localhost:11434",
-    "ollama_post": "http://localhost:11434/api/chat"
-}
-```
-
-## 🗂️ Project Structure Overview
-
-```
-BitVoid/
-
-├──bitvoid/
-| |
-| ├── core/
-| │   ├── bitvoid.py          # Main assistant logic orchestrator (BitVoid class)
-| │   ├── memory_manager.py   # Memory module for storing conversation context
-| │   └── ollama_model.py     # Interface to local LLM via Ollama
-| │
-| ├── config/
-| │   ├── config.json         # External configuration file (paths, audio settings)
-| │   └── Config.py           # Reads config.json and exposes usable config values
-| │
-| ├── io_methods/
-| │   ├── stt.py              # Speech-to-Text using Vosk
-| │   ├── tts.py              # Text-to-Speech using Edge-TTS
-| │   └── chat.py             # Conversation Flow Controller (planned)
-| │
-| ├── utils/
-| │   └── logger.py           # Logging utilities (planned)
-| │
-| └──data/
-|    └── memory.json         # Persistent long-term memory file
-├── tests/
-|
-├── .gitignore
-├── README.md
-├── requirement.txt
-└── main.py                 # App entry point — initializes and runs BitVoid
-
-```
-
-## 🚀 Next Steps
-
-- [ ] Complete implementation of the interactive conversation loop with real-time speech streaming.
-- [ ] Develop dynamic memory and personalization to enable context-aware dialogue.
-- [ ] Add automatic timestamped logging for debugging and conversation history.
-- [ ] Expand language support with translation layers (e.g., Whisper).
-- [ ] Refine error handling and concurrency for smoother user experience.
+* `database.py` is currently the most complete and stable module.
+* Focus now shifts to **wiring** the DB with actual assistant behavior.
+* `reference/` will be critical to long-term knowledge management.
+* Modular thinking remains key — avoid bloated files.

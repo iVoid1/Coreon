@@ -1,2 +1,5 @@
 __pycache__/
 *vosk*
+io_methods/
+.vscode/
+resources/
