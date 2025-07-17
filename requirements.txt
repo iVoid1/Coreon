@@ -5,3 +5,6 @@ sqlalchemy
 datetime
 aiohttp
 requests
+duckduckgo-search
+bs4
+ollama

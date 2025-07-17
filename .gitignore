@@ -3,3 +3,7 @@ __pycache__/
 io_methods/
 .vscode/
 resources/
+coreon/config/
+*.db
+*.sqlite
+search/
