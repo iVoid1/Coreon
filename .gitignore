@@ -6,4 +6,3 @@ resources/
 coreon/config/
 *.db
 *.sqlite
-search/

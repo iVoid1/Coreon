@@ -1,52 +1,37 @@
-# 🧠 Coreon —  Assistant (Prototype)
+# 🧠 Coreon — Personal AI Agent Prototype
 
-Coreon is a personal AI-driven voice assistant prototype designed to simulate real-time conversations with a local Large Language Model (LLM).
+Coreon is a personal AI-driven agent prototype leveraging local Large Language Models (LLMs) designed to enable intelligent, context-aware interactions with users.
 
-## 🎯 Current Progress Summary
+---
 
-### ✅ Completed
+## Project Overview
 
-* **Local LLM Integration** using [Ollama] (LLaMA 3.1 or other models).
-* **Basic architecture and modular project structure**:
-  * `core/`: Logic (e.g., ollama model interface)
-  * `data/`: Database models
-  * `utils/`: Helpers (e.g., logger)
-* **Database design finalized and implemented**:
-  * `session`, `conversation`, `embedding`, `reference`, `memory`
-  * Proper foreign key relations and cascade behavior in place
-* **Basic chat logic with logging and session creation**
+Coreon is more than just a voice assistant; it is a versatile AI agent framework focused on understanding context, retrieving knowledge, and delivering intelligent responses. Voice interaction is considered one of many modular features rather than the core itself.
 
-### 🛠 In Progress
+---
 
-* **Refactor `ollama_model.py`**:
-  * Separate model communication logic
-  * Clean, structured sync/async methods
-  * Remove unrelated responsibilities (only chat and generation logic should live here)
-* **Design and implement `reference/` package**:
-  * `reference_management.py`: Orchestrator
-  * `reference.py`: Data class for reference item
-  * `search_query.py`: Represents a search operation metadata
+## Future Vision and Evolution
 
-### ⏸ On Hold
+- **Deep Contextual Intelligence:**  
+  Coreon will maintain long-term conversational context, enabling natural and flexible interactions across multiple modalities.
 
-* **Config system (`config/`)**:
-  * Current usage paused until needed (e.g., dynamic model loading, user preferences)
+- **Modular Feature Design:**  
+  Voice, text, and other input/output methods will be modular components that can be integrated or replaced according to user needs.
 
-### 🚧 Planned (Next Phase)
+- **Knowledge Management and Continuous Learning:**  
+  Advanced mechanisms for storing, retrieving, and analyzing information from diverse sources, combined with automated summarization and knowledge updating.
 
-* **Implement memory logic (`memory_management.py`)**
-  * Store recent dialogue context
-  * Retrieve conversation windows for embedding and continuity
-* **Use database actively in flow:**
-  * Embed user prompts and assistant replies
-  * Log related references and search actions
-* **Add reference-aware generation**
-  * If user asks a question → check if info exists in `reference`
-  * Else → auto-search, summarize, store
+- **Multi-Source Integration:**  
+  Intelligent search across the internet, local files, and databases to enhance response quality and reliability.
 
-## ✍ Notes
+- **Dynamic Memory System:**  
+  Smart memory management that retains important past conversations and data, allowing for more personalized interactions.
 
-* `database.py` is currently the most complete and stable module.
-* Focus now shifts to **wiring** the DB with actual assistant behavior.
-* `reference/` will be critical to long-term knowledge management.
-* Modular thinking remains key — avoid bloated files.
+- **Customization and Flexibility:**  
+  Users will be able to customize AI models, interaction modes, and knowledge bases to suit individual preferences.
+
+---
+
+## Summary
+
+Coreon is evolving into a comprehensive AI agent platform that goes beyond voice interaction, offering an adaptable, intelligent assistant capable of learning, understanding, and assisting users across multiple domains and interfaces.
