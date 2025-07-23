@@ -1,8 +1,9 @@
 __pycache__/
-*vosk*
-io_methods/
 .vscode/
-resources/
-coreon/config/
+*search/
 *.db
 *.sqlite
+utils.py
+todo.md
+test*
+todo.md

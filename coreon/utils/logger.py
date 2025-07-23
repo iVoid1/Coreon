@@ -1,40 +1,66 @@
 import logging
-from typing import Any
+from rich.logging import RichHandler
+from rich.console import Console
 
-
+SUCCESS = 25
+logging.addLevelName(SUCCESS, "SUCCESS")
 
 class Logger:
-    def __init__(self, name: str):
+    _instance = None
+
+    def __new__(cls, name: str):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._init_logger(name)
+        return cls._instance
+
+    def _init_logger(self, name):
+        self.console = Console(log_time_format="%H:%M:%S")
         self._logger = logging.getLogger(name)
         self._logger.setLevel(logging.DEBUG)
-        self._format = '%(name)s - %(levelname)s - %(message)s'
-        self.set_format(self._format)
+
+        if not self._logger.hasHandlers():
+            handler = RichHandler(
+                console=self.console,
+                show_time=True,
+                rich_tracebacks=True,
+                tracebacks_width=80,
+            )
+            formatter = logging.Formatter("%(message)s")
+            handler.setFormatter(formatter)
+            self._logger.addHandler(handler)
+
+    def log(self, level, msg, echo: bool = True, tag=None, **kwargs):
+        if not echo:
+            return
+
+        if tag:
+            msg = f"[{tag}] {msg}"
+        self._logger.log(level, msg, stacklevel=3, **kwargs)
+
+    def info(self, msg, tag: str = "", echo: bool = True, **kwargs):
+        self.log(logging.INFO, msg, tag=tag, echo=echo, **kwargs)
         
-
-    def debug(self, msg: Any):
-        self._logger.debug(msg)
-
-    def info(self, msg: Any):
-        self._logger.info(msg)
-
-    def warning(self, msg: Any):
-        self._logger.warning(msg)
-
-    def error(self, msg: Any, exc_info: bool = False):
-        self._logger.error(msg, exc_info=exc_info)
-
-    def critical(self, msg: Any):
-        self._logger.critical(msg)
-    
-    def exception(self, msg: Any):
-        self._logger.exception(msg)
-    
-    def set_format(self, fmt: str):
-        self.formatter = logging.Formatter(fmt)
-        self.handler = logging.StreamHandler()
-        self.handler.setFormatter(self.formatter)
-        self._logger.addHandler(self.handler)
+    def debug(self, msg, tag: str = "", echo: bool = True, **kwargs):
+        self.log(logging.DEBUG, msg, tag=tag, echo=echo, **kwargs)
         
+    def error(self, msg, tag: str = "", echo: bool = True, **kwargs):
+        self.log(logging.ERROR, msg, tag=tag, echo=echo, **kwargs)
         
+    def success(self, msg, tag: str = "", echo: bool = True, **kwargs):
+        self.log(SUCCESS, msg, tag=tag, echo=echo, **kwargs)
         
-logger = Logger(__name__)
+    def warning(self, msg, tag: str = "", echo: bool = True, **kwargs):
+        self.log(logging.WARNING, msg, tag=tag, echo=echo, **kwargs)
+        
+    def critical(self, msg, tag: str = "", echo: bool = True, **kwargs):
+        self.log(logging.CRITICAL, msg, tag=tag, echo=echo, **kwargs)
+        
+    def exception(self, msg, tag: str = "", echo: bool = True, **kwargs):
+        self.log(logging.ERROR, msg, tag=tag, echo=echo, exc_info=True, **kwargs)
+
+    def set_console(self, console: Console):
+        self.console = console
+
+    def __repr__(self):
+        return f"<Logger(name={self._logger.name})>"

@@ -1,37 +1,32 @@
-# 🧠 Coreon — Personal AI Agent Prototype
+# 🧠 Coreon — AI Chat with Memory
 
-Coreon is a personal AI-driven agent prototype leveraging local Large Language Models (LLMs) designed to enable intelligent, context-aware interactions with users.
+A simple chat interface with local LLM integration and persistent conversation history.
 
----
+## 🎯 Current Status
 
-## Project Overview
+Coreon is currently a basic chat application that can:
+- Connect to local LLM models (Ollama)
+- Save all messages to a database with session tracking
+- Retrieve and display conversation history
+- Maintain context within chat sessions
 
-Coreon is more than just a voice assistant; it is a versatile AI agent framework focused on understanding context, retrieving knowledge, and delivering intelligent responses. Voice interaction is considered one of many modular features rather than the core itself.
+## ✨ Features
 
----
+**Database Integration**
+- All conversations stored persistently
+- Session-based message organization
+- Message history retrieval and viewing
 
-## Future Vision and Evolution
+**Local AI Processing**
+- Ollama integration for local LLM models
+- No external API dependencies
+- Complete privacy with local deployment
 
-- **Deep Contextual Intelligence:**  
-  Coreon will maintain long-term conversational context, enabling natural and flexible interactions across multiple modalities.
+**Session Management**
+- Unique session IDs for conversation tracking
+- Message persistence across app restarts
+- Simple chat interface
 
-- **Modular Feature Design:**  
-  Voice, text, and other input/output methods will be modular components that can be integrated or replaced according to user needs.
+## 🚀 Development Phase
 
-- **Knowledge Management and Continuous Learning:**  
-  Advanced mechanisms for storing, retrieving, and analyzing information from diverse sources, combined with automated summarization and knowledge updating.
-
-- **Multi-Source Integration:**  
-  Intelligent search across the internet, local files, and databases to enhance response quality and reliability.
-
-- **Dynamic Memory System:**  
-  Smart memory management that retains important past conversations and data, allowing for more personalized interactions.
-
-- **Customization and Flexibility:**  
-  Users will be able to customize AI models, interaction modes, and knowledge bases to suit individual preferences.
-
----
-
-## Summary
-
-Coreon is evolving into a comprehensive AI agent platform that goes beyond voice interaction, offering an adaptable, intelligent assistant capable of learning, understanding, and assisting users across multiple domains and interfaces.
+Currently focused on establishing a solid foundation with database-driven memory capabilities before expanding into more advanced features.
