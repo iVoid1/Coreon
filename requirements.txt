@@ -1,10 +1,7 @@
-asyncio
-pathlib
-logging
 sqlalchemy
-datetime
-aiohttp
-requests
-duckduckgo-search
-bs4
 ollama
+rich
+faiss
+numpy
+logging
+contextlib

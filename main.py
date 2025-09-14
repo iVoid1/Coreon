@@ -1,71 +1,67 @@
-from coreon.data.database import Database
+from coreon.data.database import Database, Embedding
 from coreon.Ai.coreon import Coreon
-from coreon.utils.logger import Logger
+from coreon.utils.utils import setup_logger
 
-logger = Logger(__name__)
+logger = setup_logger(__name__)
+
+def clear_screen():
+    """Clear the console screen."""
+    print("\033c", end="")
+
+def get_user_input() -> str:
+    """Get user input with prompt."""
+    return input("\nYou: ").strip()
+
+def print_response(content: str):
+    """Print AI response."""
+    print(f"Coreon: {content}")
 
 def main():
-    db = Database(
-        db_path="sqlite:///coreon/coreon.sqlite", # SQLite database path
-        initialize_tables=True, # Create tables if they don't exist
-        foreign_keys=True, # Enable enforce_sqlite_fk() function for SQLite foreign key enforcement
-        echo=False# Enable SQLAlchemy echo for debugging
-        )    
+    logger.info("Starting Coreon...")
+    # Initialize components
+    db = Database("sqlite:///coreon/coreon.sqlite")
     
-    session = db.create_session(title="Test Session", catch=False) # Create a new session
-    if session:
-        logger.info(f"Started new session: (ID: {session.id}, title: '{session.title}')")
-    else:
-        logger.warning("Failed to create a new session.")
-        
-    model = Coreon(model="llama3.1") # Initialize the Coreon model client
-    logger.info(f"Using model: {model.model}")    
+    
+    coreon = Coreon(db=db, ai_model="llama3.1")
 
+    # Create session
+    session = db.create_session("Chat Session")
+    if not session:
+        logger.error("Failed to create session. Exiting.")
+        return
+    
+    logger.info(f"Chat started - Session: {session.id}")
+    print("Chat with Coreon (type 'exit' to quit, 'clear' to clear screen)")
+    
     while True:
         try:
-            # Get user input
-            print("\nType your message (or 'exit' to quit): ", end="")
-            message = input("You: ").strip()
-            if not message:
+            user_input = get_user_input()
+            
+            if not user_input:
                 continue
-            if message.lower() == "exit":
-                logger.info("Exiting the chat session.")
+            
+            if user_input.lower() == "exit":
+                logger.info("Chat session ended")
                 break
-            if message.lower() == "clear":
-                logger.info("Clearing the console.")
-                print("\033c", end="")
+            
+            if user_input.lower() == "clear":
+                clear_screen()
                 continue
             
-            # Fetch conversation and build context
-            # conversation = db.fetch_conversation(session_id)
-            # Convert Conversation objects to dict
-            # conversations = [{"role": conv.role, "content": conv.message} for conv in conversation]
-            # TODO: make a function for this
-            # TODO: use the context builder to build the context
-
-            # Generate response
-            response = model._chat(message, stream=True)
-            response_chat = ""
-            print(f"Coreon: ")
-            for chunk in response:
-                print(chunk.message.content, end='', flush=True) # type: ignore
-                response_chat += chunk.message.content # type: ignore
-            print()
+            # Save user message
+            db.save_message(
+                session_id=session.id, # type: ignore
+                role="user",
+                content=user_input,
+                model_name=coreon.ai_model)
             
-            # Save conversation
-            if session is None:
-                logger.error("No session found. Cannot save conversation.")
-                continue
+            #TODO: Get AI response
             
-            db.insert_conversation(session.id, model.model, "user", message, ) # type: ignore
-            db.insert_conversation(session.id, model.model, "assistant", response_chat, ) # type: ignore
-
-
         except KeyboardInterrupt:
-            logger.warning("User interrupted the session.")
+            logger.info("Chat interrupted by user")
             break
         except Exception as e:
-            logger.exception(f"Unexpected error: {e}")
+            logger.error(f"Error in chat loop: {e}")
 
 if __name__ == "__main__":
     main()
