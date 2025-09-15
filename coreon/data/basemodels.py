@@ -1,48 +1,46 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, JSON
 from sqlalchemy.orm import declarative_base, relationship
 from datetime import datetime
 
 Base = declarative_base()
 
-class Session(Base):
+class Chat(Base):
     """
-    Represents a chat session.
-    Stores metadata such as the session title, creation time, and last activity timestamp.
-    Has one-to-many relationships with conversations and search tied to this session.
+    Represents a chat.
+    Stores metadata such as the chat title, creation time, and last activity timestamp.
+    Has one-to-many relationships with conversations and search tied to this chat.
     """
-    __tablename__ = 'session'
+    __tablename__ = 'chat'
 
     id = Column(Integer, primary_key=True, autoincrement=True, nullable=False)
-    title = Column(String, default="Untitled Session")
+    title = Column(String, default="Untitled chat")
     created_at = Column(DateTime, default=datetime.now)
     last_active_at = Column(DateTime, default=datetime.now)
 
-    # العلاقات
-    conversations = relationship("Conversation", back_populates="session")
-    searches = relationship("Search", back_populates="session")
-    embedding = relationship("Embedding", back_populates="session")
-    search_queries = relationship("SearchQuery", back_populates="session")
+    conversations = relationship("Conversation", back_populates="chat")
+    searches = relationship("Search", back_populates="chat")
+    embedding = relationship("Embedding", back_populates="chat")
+    search_queries = relationship("SearchQuery", back_populates="chat")
 
     def __str__(self):
-        return f"<Session(id={self.id}, title='{self.title}')>"
+        return f"<Chat(id={self.id}, title='{self.title}')>"
 
 class Conversation(Base):
     """
-    Represents a single message within a chat session.
+    Represents a single message within a chat.
     Contains the role (user or assistant), message content, timestamp, and the model used.
-    Linked to one session and optionally related embeddings and memories.
+    Linked to one chat and optionally related embeddings and memories.
     """
     __tablename__ = 'conversation'
 
     id = Column(Integer, primary_key=True)
-    session_id = Column(Integer, ForeignKey('session.id'), nullable=False)
+    chat_id = Column(Integer, ForeignKey('chat.id'), nullable=False)
     model_name = Column(String(255), nullable=True)
     role = Column(String(255), nullable=True)
     message = Column(Text, nullable=True)
     timestamp = Column(DateTime, default=datetime.now)
 
-    # العلاقات
-    session = relationship("Session", back_populates="conversations")
+    chat = relationship("Chat", back_populates="conversations")
     embedding = relationship("Embedding", back_populates="conversation", uselist=False)
     memories = relationship("Memory", back_populates="conversation")
 
@@ -56,13 +54,12 @@ class Embedding(Base):
     __tablename__ = 'embedding'
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    session_id = Column(Integer, ForeignKey('session.id'), nullable=False)
+    chat_id = Column(Integer, ForeignKey('chat.id'), nullable=False)
     message_id = Column(Integer, ForeignKey('conversation.id'), nullable=False)
-    vector = Column(Text, nullable=True)
+    vector = Column(JSON, nullable=False)
     faiss_id = Column(Integer, nullable=True)  # هذا العمود هو اللي بيربط بـ Faiss
 
-    # العلاقات
-    session = relationship("Session", back_populates="embedding")
+    chat = relationship("Chat", back_populates="embedding")
     conversation = relationship("Conversation", back_populates="embedding")
 
     def __str__(self):
@@ -81,7 +78,6 @@ class Memory(Base):
     timestamp = Column(DateTime, default=datetime.now)
     expires_at = Column(DateTime, nullable=True)
 
-    # العلاقات
     conversation = relationship("Conversation", back_populates="memories")
 
     def __str__(self):
@@ -89,13 +85,13 @@ class Memory(Base):
     
 class Search(Base):
     """
-    Stores the results of web/document search related to a session.
+    Stores the results of web/document search related to a chat.
     Includes the topic, content, source URL, LLM analysis, timestamps, and expiry.
     """
     __tablename__ = 'search'
 
     id = Column(Integer, primary_key=True)
-    session_id = Column(Integer, ForeignKey('session.id'), nullable=False)
+    chat_id = Column(Integer, ForeignKey('chat.id'), nullable=False)
     search_query_id = Column(Integer, ForeignKey('search_query.id'), nullable=False)
     topic = Column(String(255))
     content = Column(Text)
@@ -104,8 +100,7 @@ class Search(Base):
     timestamp = Column(DateTime, default=datetime.now)
     expired_at = Column(DateTime, nullable=True)
 
-    # العلاقات
-    session = relationship("Session", back_populates="searches")
+    chat = relationship("Chat", back_populates="searches")
     search_query = relationship("SearchQuery", back_populates="searches")
 
     def __str__(self):
@@ -113,18 +108,17 @@ class Search(Base):
 
 class SearchQuery(Base):
     """
-    Represents the original search request made during a session.
+    Represents the original search request made during a chat.
     Tracks query text and timestamp.
     """
     __tablename__ = 'search_query'
 
     id = Column(Integer, primary_key=True)
-    session_id = Column(Integer, ForeignKey('session.id'), nullable=False)
+    chat_id = Column(Integer, ForeignKey('chat.id'), nullable=False)
     query_text = Column(String(255), nullable=False)
     timestamp = Column(DateTime, default=datetime.now)
 
-    # العلاقات
-    session = relationship("Session", back_populates="search_queries")
+    chat = relationship("Chat", back_populates="search_queries")
     searches = relationship("Search", back_populates="search_query")
 
     def __str__(self):

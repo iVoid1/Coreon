@@ -6,73 +6,184 @@ import json
 import numpy as np
 import os
 
-from typing import Iterator, List, Dict, Union
+from typing import Optional
 
-from coreon.data.basemodels import Session, Conversation, Embedding
+from coreon.data.basemodels import Chat, Conversation, Embedding
 from coreon.data.database import Database
-from coreon.utils.utils import setup_logger
+from coreon.utils.log import setup_logger
 
 logger = setup_logger(__name__)
 
 
 class Coreon:
-    """Simple wrapper for Ollama chat client."""
+    """Coreon AI Module. 
+    use database to store conversation data
+    use ollama to generate responses
     
-    def __init__(self, db: Database, ai_model: str = "llama3.1", embed_model: str = "nomic-embed-text", host: str = "http://localhost:11434"):
+    Attributes:
+        db (Database): Database object
+        ai_model (str): AI model name
+        embedding_model (str): Embedding model name
+    """
+    
+    def __init__(
+        self, db: Database, 
+        ai_model: str = "llama3.1",
+        embed_model: str = "nomic-embed-text", 
+        dimension: int = 768,
+        host: str = "http://localhost:11434"
+        ):
+        """Initialize Coreon AI Module.
+        
+        Args:
+            db (Database): Database object
+            ai_model (str): AI model name
+            embedding_model (str): Embedding model name
+            host (str): Ollama host
+            """
         self.db = db
         self.host = host
-        self.client = ollama.Client(host=host)
+        self.client = ollama.AsyncClient(host=host)
         self.ai_model = ai_model
         self.embedding_model = embed_model
+        self.dimension = dimension
+        self.chat_id = None
         self.faiss_index = None
-        self.history = []
+        self.history: list[str] = []
         self.conversation_data = []
+        self.embeddings = np.array([], dtype=np.float32)
         self.logger = setup_logger(__name__)
         
         self.logger.info("Coreon AI initialized")  
+                     
+    async def load_conversation(self, chat_id: int):
+        """Loads conversation from the chat into the FAISS index."""
+        self.chat_id = chat_id
+        self.conversation_data = await self.db.get_conversation(chat_id=chat_id)
+        self.logger.info(f"Conversation loaded for chat {chat_id}")
+        self.faiss_index = faiss.IndexFlatL2(self.dimension)
+        await self.load_vectors(chat_id=chat_id)
+        if self.embeddings.shape[0] == 0:
+            self.logger.warning(f"No embeddings found for chat {chat_id}")
+            return
+        self.faiss_index.add(self.embeddings) # type: ignore
+        self.logger.info(f"Conversation loaded into FAISS index{self.embeddings.shape}")  
+      
+    async def load_vectors(self, chat_id: Optional[int] = None):
+        """Returns the vectors of the chat id if not provided use self.chat_id."""
+        embeddings = []
+        if chat_id:
+            for embedding in await self.db.get_embeddings(chat_id=chat_id):
+                embeddings.append(embedding.vector)
                 
+        elif self.chat_id:
+            for embedding in await self.db.get_embeddings(chat_id=self.chat_id):
+                embeddings.append(embedding.vector)
+        else:
+            self.logger.warning("No chat id provided")
+            
+        self.embeddings = np.array(embeddings, dtype=np.float32)
+        return self.embeddings
+    
+    async def embed_text(self, text: str):
+        """Generates an embedding for the given text."""
+        try:
+            response = await self.client.embeddings(
+                model=self.embedding_model, prompt=text
+            )
+            return response.embedding
+        except Exception as e:
+            self.logger.error(f"Error getting embedding: {e}")
+            return []
         
-
-    def load_memory(self, session_id: int):
-        # This is a placeholder for your database logic
-        # self.history = self.db.get_conversation(session_id=session_id)
-        conversation_data = np.array(self.db.get_conversation(session_id=session_id)).astype(np.float32)
-        for conversation in conversation_data:
-            self.history.append({"role": conversation.role, "content": conversation.message})
-        self.conversation_data = conversation_data
-        self.faiss_index = faiss.IndexFlatL2(self.conversation_data.shape[1])
-        self.faiss_index.add(conversation_data) # type: ignore
-
-
-    def search_memory(self, query: str, k: int = 5) -> List[Dict[str, Union[int, str, float]]]:
+    async def search_memory(self, query: str, k: int = 5):
         """Searches the FAISS index for relevant memories."""
         if self.faiss_index is None:
             return []
-        
-        query_embedding = self.embed_text(query)
-        distances, indices = self.faiss_index.search(query_embedding, k=k) # type: ignore
-        
-        results = []
-        for i, idx in enumerate(indices[0]):
-            results.append({
-                "content": self.history[idx]["content"],
-                "distance": distances[0][i]
-            })
-        return results
-    
-    def embed_text(self, text: str):
-        """Generates an embedding for the given text."""
-        return np.array(self.client.embeddings(model=self.embedding_model, prompt=text)['embedding']).astype(np.float32)
+        self.history = []
+        query_embedding = await self.embed_text(query)
+        query_array = np.array([query_embedding], dtype=np.float32)
+        faiss.normalize_L2(query_array)
+                
+        distances, indices = self.faiss_index.search(query_array, k=k) # type: ignore
+        for distance, idx in zip(distances[0], indices[0]):
+            idx = int(idx)
+            if idx == -1:
+                break
+            self.history.append(str(self.conversation_data[idx].message))
+        return distances, indices
 
-    # async def chat(
-    #     self,
-    #     content: str,
-    #     user,
-    #     channel_id: int,
-    #     mommy_mode: bool = False,
-    # ):
-    #     # This is a placeholder for your chat logic
-    #     response = await self.client.chat(
-    #         model=self.model,
-    #         messages=self.history,
-    #         prompt=f"[Name: {user.display_name}]: {content}",)
+    async def add_index(self, embed: Embedding, message: Chat):
+        """Add a message to the FAISS index."""
+        embedding_array = np.array([embed.vector], dtype=np.float32)
+        faiss.normalize_L2(embedding_array)
+        self.faiss_index.add(embedding_array) # type: ignore
+        self.conversation_data.append(message)
+
+    async def save_message(self, chat_id: int, content: str, role: str, ):
+        """Saves messages to the database."""
+        message = await self.db.save_message(
+            chat_id=chat_id, 
+            role=role,
+            message=content, 
+            model_name=self.ai_model
+            )
+        
+        embed = await self.db.save_embedding(
+            chat_id=chat_id, 
+            message_id=message.id,  # type: ignore
+            vector=await self.embed_text(content),
+            )
+        await self.add_index(embed, message)
+        return message, embed
+    
+    async def chat(
+        self,
+        chat_id: int,
+        content: str,
+    ):
+        """Generates a message from the AI model.
+            it loads the conversation into the FAISS index if it is not already loaded
+            search for the most relevant message in the conversation and use it as a prompt with the new message(content)
+            saves the content and response to the database
+        Args:
+            chat_id (int): The ID of the chat.
+            content (str): The content of the message.
+            user (User): The user who sent the message.
+        """
+        if self.faiss_index is None:
+            await self.load_conversation(chat_id)
+        user_message, user_embedding = await self.save_message(
+            chat_id=chat_id, 
+            content=content,
+            role="user"
+            )
+        
+        if user_message and user_embedding:
+            self.logger.info(f"Saved user message for chat {chat_id}")
+        else:
+            self.logger.warning(f"Failed to save user message for chat {chat_id}")
+            
+        #TODO: fix search memory system and make it more efficient
+        #TODO: print response flush
+        
+        D, I = await self.search_memory(content, k=5)
+        print(self.history)
+        print([{"role": "user", "content": self.history}])
+        response = await self.client.chat(
+            model=self.ai_model,
+            messages=[{"role": "user", "content": str(self.history)}]
+            )
+        self.logger.info(f"Generated response for chat {chat_id}")
+        
+        ai_message, ai_embedding = await self.save_message(
+            chat_id=chat_id, 
+            content=str(response.message.content),
+            role="assistant"
+            )
+        
+        if ai_message and ai_embedding:
+            self.logger.info(f"Saved AI message for chat {chat_id}")
+        else:
+            self.logger.warning(f"Failed to save AI message for chat {chat_id}")
+        return ai_message
