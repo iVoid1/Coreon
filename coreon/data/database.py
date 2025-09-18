@@ -1,6 +1,6 @@
-from sqlalchemy import create_engine, event
-from sqlalchemy.orm import sessionmaker
-from contextlib import contextmanager
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from sqlalchemy import event, select
+from contextlib import asynccontextmanager
 from typing import Optional, Union
 from datetime import datetime
 import logging
@@ -25,26 +25,30 @@ class Database:
         self.logger = logging.getLogger(__name__)
     
 
-        self.engine = create_engine(db_path, echo=echo)
-        self.SessionLocal = sessionmaker(bind=self.engine, autoflush=True)
+        self.engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}", echo=echo)
+        self.SessionLocal = async_sessionmaker(bind=self.engine, autoflush=True, expire_on_commit=False)
         
         # Enable SQLite foreign keys
         self._enable_foreign_keys()
         
-        # Create tables if they do not exist
-        Base.metadata.create_all(self.engine)
         self.logger.info(f"Database initialized: {db_path}")
 
     def _enable_foreign_keys(self):
         """Enable foreign key constraints for SQLite."""
-        @event.listens_for(self.engine, "connect")
+        @event.listens_for(self.engine.sync_engine, "connect")
         def set_fk_pragma(dbapi_connection, connection_record):
             cursor = dbapi_connection.cursor()
             cursor.execute("PRAGMA foreign_keys=ON")
             cursor.close()
             
-    @contextmanager
-    def create_db_session(self):
+    async def init_db(self):
+        """Creates database tables if they don't exist."""
+        async with self.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            self.logger.info("Database tables created.")
+            
+    @asynccontextmanager
+    async def create_db_session(self):
         """
         Context manager for database sessions.
         
@@ -54,13 +58,13 @@ class Database:
         try:
             yield db_session
             db_session.expunge_all()  # Clear the session cache
-            db_session.commit()
+            await db_session.commit()
         except Exception as e:
-            db_session.rollback()
+            await db_session.rollback()
             self.logger.error(f"Session rollback due to error: {e}")
             raise
         finally:
-            db_session.close()
+            await db_session.close()
 
     async def insert(self, item: Union[Chat, Conversation, Embedding]):
         """
@@ -69,10 +73,10 @@ class Database:
         :param item: The item to insert.
         :return: The inserted item.
         """
-        with self.create_db_session() as db_session:
+        async with self.create_db_session() as db_session:
             db_session.add(item)
-            db_session.flush()
-            db_session.refresh(item)
+            await db_session.flush()
+            await db_session.refresh(item)
             return item
 
     async def create_chat(self, title: str = "Untitled chat")-> Chat:
@@ -155,10 +159,13 @@ class Database:
         :return: chat object or None if not found.
         """
         try:
-            with self.create_db_session() as db_session:
-                chat = db_session.query(Chat).filter(
-                    Chat.id == chat_id
-                ).first()
+            async with self.create_db_session() as db_session:
+                result = await db_session.execute(
+                    select(Chat).where(
+                        Chat.id == chat_id
+                        )
+                )
+                chat = result.scalars().first()
                 return chat
         except Exception as e:
             self.logger.error(f"Failed to get chat by ID: {e}")
@@ -171,8 +178,11 @@ class Database:
         :return: List of all chat objects.
         """
         try:
-            with self.create_db_session() as db_session:
-                chats = db_session.query(Chat).all()
+            async with self.create_db_session() as db_session:
+                result = await db_session.execute(
+                    select(Chat)
+                    )
+                chats = list(result.scalars().all())
                 return chats
         except Exception as e:
             self.logger.error(f"Failed to get all chats: {e}")
@@ -187,11 +197,13 @@ class Database:
         :return: List of Conversation objects or None if retrieval failed.
         """
         try:
-            with self.create_db_session() as db_session:
-                conversations = db_session.query(Conversation).filter(
-                    Conversation.chat_id == chat_id
-                ).order_by(Conversation.timestamp).all()
-                
+            async with self.create_db_session() as db_session:
+                result = await db_session.execute(
+                    select(Conversation).where(
+                        Conversation.chat_id == chat_id
+                        ).order_by(Conversation.timestamp)
+                )
+                conversations = list(result.scalars().all())
                 return conversations
         except Exception as e:
             self.logger.error(f"Failed to get conversation: {e}")
@@ -205,16 +217,19 @@ class Database:
         :return: List of Embedding objects or [] if retrieval failed.
         """
         try:
-            with self.create_db_session() as db_session:
-                embeddings = db_session.query(Embedding).filter(
-                    Embedding.chat_id == chat_id
-                ).all()
+            async with self.create_db_session() as db_session:
+                result = await db_session.execute(
+                    select(Embedding).where(
+                        Embedding.chat_id == chat_id
+                        )
+                )
+                embeddings = list(result.scalars().all())
                 return embeddings
         except Exception as e:
             self.logger.error(f"Failed to get embeddings: {e}")
             return []
 
-    def close(self):
+    async def close(self):
         """Close the database connection."""
-        self.engine.dispose()
+        await self.engine.dispose()
         self.logger.info("Database connection closed.")

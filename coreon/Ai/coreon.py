@@ -29,7 +29,7 @@ class Coreon:
     def __init__(
         self, db: Database, 
         ai_model: str = "llama3.1",
-        embed_model: str = "nomic-embed-text", 
+        embed_model: str = "nomic-embed-text:latest", 
         dimension: int = 768,
         host: str = "http://localhost:11434"
         ):
@@ -48,8 +48,8 @@ class Coreon:
         self.embedding_model = embed_model
         self.dimension = dimension
         self.chat_id = None
-        self.faiss_index = None
-        self.history: list[str] = []
+        self.faiss_index = faiss.IndexFlatL2(dimension)
+        self.history: list[dict] = []
         self.conversation_data = []
         self.embeddings = np.array([], dtype=np.float32)
         self.logger = setup_logger(__name__)
@@ -63,7 +63,7 @@ class Coreon:
         self.logger.info(f"Conversation loaded for chat {chat_id}")
         self.faiss_index = faiss.IndexFlatL2(self.dimension)
         await self.load_vectors(chat_id=chat_id)
-        if self.embeddings.shape[0] == 0:
+        if not self.embeddings.size:
             self.logger.warning(f"No embeddings found for chat {chat_id}")
             return
         self.faiss_index.add(self.embeddings) # type: ignore
@@ -94,28 +94,59 @@ class Coreon:
             return response.embedding
         except Exception as e:
             self.logger.error(f"Error getting embedding: {e}")
-            return []
+            raise e
         
     async def search_memory(self, query: str, k: int = 5):
-        """Searches the FAISS index for relevant memories."""
-        if self.faiss_index is None:
-            return []
-        self.history = []
-        query_embedding = await self.embed_text(query)
-        query_array = np.array([query_embedding], dtype=np.float32)
-        faiss.normalize_L2(query_array)
-                
-        distances, indices = self.faiss_index.search(query_array, k=k) # type: ignore
-        for distance, idx in zip(distances[0], indices[0]):
-            idx = int(idx)
-            if idx == -1:
-                break
-            self.history.append(str(self.conversation_data[idx].message))
-        return distances, indices
+        """Searches the FAISS index for relevant memories.
 
-    async def add_index(self, embed: Embedding, message: Chat):
+        Args:
+            query (str): The search query.
+            k (int): The number of relevant memories to retrieve.
+
+        Returns:
+            Tuple[np.ndarray, np.ndarray]: Distances and indices of the nearest neighbors.
+        """
+        if self.faiss_index is None or self.faiss_index.ntotal == 0:
+            self.logger.warning("FAISS index is not initialized or empty. No search will be performed.")
+            return np.array([[]]), np.array([[]])
+
+        try:
+            query_embedding = await self.embed_text(query)
+            query_array = np.array([query_embedding], dtype=np.float32)
+            faiss.normalize_L2(query_array)
+
+            distances, indices = self.faiss_index.search(query_array, k=k) # type: ignore
+            self.logger.info(f"FAISS search results: Distances={distances}, Indices={indices}")
+            return distances, indices
+        
+        except Exception as e:
+            self.logger.error(f"Error during memory search: {e}")
+            return np.array([[]]), np.array([[]])
+        
+    async def search_relevant(self, indices: np.ndarray, content: str=""):
+        # self.history = []
+        if indices.any():
+            idx:int
+            for idx in indices[0]:
+                if 0 <= idx < len(self.conversation_data):
+                    message_content = self.conversation_data[idx].message
+                    message_role = self.conversation_data[idx].role
+                    self.history.append({
+                        "role": message_role,
+                        "content": message_content
+                    })
+
+            if content:
+                self.history.append({"role": "user", "content": content})
+            else:
+                self.logger.warning("No content provided for search_relevant")
+
+        else:
+            self.logger.warning(f"No relevant messages found for chat {self.chat_id}")
+
+    async def add_index(self, embed: list, message: Chat):
         """Add a message to the FAISS index."""
-        embedding_array = np.array([embed.vector], dtype=np.float32)
+        embedding_array = np.array([embed], dtype=np.float32)
         faiss.normalize_L2(embedding_array)
         self.faiss_index.add(embedding_array) # type: ignore
         self.conversation_data.append(message)
@@ -134,7 +165,7 @@ class Coreon:
             message_id=message.id,  # type: ignore
             vector=await self.embed_text(content),
             )
-        await self.add_index(embed, message)
+        await self.add_index(embed.vector, message) # type: ignore
         return message, embed
     
     async def chat(
@@ -149,41 +180,48 @@ class Coreon:
         Args:
             chat_id (int): The ID of the chat.
             content (str): The content of the message.
-            user (User): The user who sent the message.
         """
-        if self.faiss_index is None:
+
+        if self.faiss_index.ntotal == 0:
             await self.load_conversation(chat_id)
+
+        D, I = await self.search_memory(content, k=5)
+        await self.search_relevant(I, content=content)
+            
+        response = await self.client.chat(
+            model=self.ai_model,
+            messages=self.history,
+            stream=True
+            )
+        self.logger.info(f"Generated response for chat {chat_id}")
+
+        message_response = []
+        async for message in response:
+            message_response.append(message.message.content)
+            yield message
+
+
         user_message, user_embedding = await self.save_message(
             chat_id=chat_id, 
             content=content,
             role="user"
             )
-        
-        if user_message and user_embedding:
+        if user_message or user_embedding:
             self.logger.info(f"Saved user message for chat {chat_id}")
         else:
             self.logger.warning(f"Failed to save user message for chat {chat_id}")
             
-        #TODO: fix search memory system and make it more efficient
-        #TODO: print response flush
+        if message_response:
+            ai_message, ai_embedding = await self.save_message(
+                chat_id=chat_id, 
+                content="".join(message_response),
+                role="assistant"
+                )
         
-        D, I = await self.search_memory(content, k=5)
-        print(self.history)
-        print([{"role": "user", "content": self.history}])
-        response = await self.client.chat(
-            model=self.ai_model,
-            messages=[{"role": "user", "content": str(self.history)}]
-            )
-        self.logger.info(f"Generated response for chat {chat_id}")
-        
-        ai_message, ai_embedding = await self.save_message(
-            chat_id=chat_id, 
-            content=str(response.message.content),
-            role="assistant"
-            )
-        
-        if ai_message and ai_embedding:
-            self.logger.info(f"Saved AI message for chat {chat_id}")
+            if ai_message and ai_embedding:
+                self.logger.info(f"Saved AI message for chat {chat_id}")
+            else:
+                self.logger.warning(f"Failed to save AI message for chat {chat_id}")
         else:
-            self.logger.warning(f"Failed to save AI message for chat {chat_id}")
-        return ai_message
+            self.logger.warning(f"Failed to generate response for chat {chat_id}")
+        yield ai_message
