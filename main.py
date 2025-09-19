@@ -1,6 +1,6 @@
 import asyncio
 
-from coreon import Database, Coreon, setup_logger
+from coreon import Coreon, setup_logger
 
 logger = setup_logger(__name__)
 
@@ -18,16 +18,18 @@ def print_response(content: str|None):
 
 async def main():
     logger.info("Starting Coreon...")
-    # Initialize components
-    db = Database("coreon/coreon.sqlite")
-    await db.init_db()
-    coreon = Coreon(db=db, ai_model="gemma3:12b", embed_model="nomic-embed-text:latest", dimension=768, host="http://localhost:11434")
+    coreon = Coreon(
+        db="coreon.sqlite", 
+        ai_model="gemma3:12b", 
+        embedding_model="nomic-embed-text:latest"
+    )
+    await coreon.init_database()
 
     # Create Chat
-    chat = await db.get_chat(chat_id=1)
+    chat = await coreon.db.get_chat(chat_id=1)
     if chat is None:
         logger.error("Failed to create chat. Exiting.")
-        chat = await db.create_chat(title="Coreon Chat")    
+        chat = await coreon.db.create_chat(title="Coreon Chat")    
 
     logger.info(f"Chat started - Chat: {chat.id}")
     print("Chat with Coreon (type 'exit' to quit, 'clear' to clear screen)")

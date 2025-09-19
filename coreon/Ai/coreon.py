@@ -1,311 +1,405 @@
-import ollama
-from ollama import ChatResponse, GenerateResponse
-
 import faiss
-import json
 import numpy as np
-import os
+from ollama import ChatResponse
+from typing import Optional, AsyncIterator, Union, List
 
-from typing import Optional, AsyncGenerator, AsyncIterator
-
-from coreon.data.basemodels import Chat, Conversation, Embedding
 from coreon.data.database import Database
+from coreon.data.basemodels import Chat
+from coreon.Ai.model import AiModel
 from coreon.utils.log import setup_logger
 
 logger = setup_logger(__name__)
 
 
 class Coreon:
-    """Coreon AI Module. 
-    use database to store conversation data
-    use ollama to generate responses
-    
-    Attributes:
-        db (Database): Database object
-        ai_model (str): AI model name
-        embedding_model (str): Embedding model name
-    """
+    """Coreon AI Module - simplified and flexible model management"""
     
     def __init__(
-        self, db: Database, 
-        ai_model: str = "llama3.1",
-        embed_model: str = "nomic-embed-text:latest", 
+        self, 
+        db: Union[Database, str], 
+        ai_model: Optional[Union[str, List[AiModel]]],
+        embedding_model: Optional[Union[str, List[AiModel]]],
         dimension: int = 768,
-        host: str = "http://localhost:11434"
-        ):
-        """Initialize Coreon AI Module.
+    ):
+        """Initialize Coreon AI Module."""
         
-        Args:
-            db (Database): Database object
-            ai_model (str): AI model name
-            embedding_model (str): Embedding model name
-            host (str): Ollama host
-            """
-        self.db = db
-        self.host = host
-        self.client = ollama.AsyncClient(host=host)
-        self.ai_model = ai_model
-        self.embedding_model = embed_model
+        # Setup database
+        self.db = Database(db) if isinstance(db, str) else db
+        
+        # Setup models
+        self.ai_models: dict[str, AiModel] = {}
+        self.embed_models: dict[str, AiModel] = {}
+        self.main_ai_model: Optional[str] = None
+        self.main_embed_model: Optional[str] = None
+        
+        # Setup FAISS
         self.dimension = dimension
-        self.chat_id = None
+        self.chat_id: Optional[int] = None
         self.faiss_index = faiss.IndexFlatL2(dimension)
+        self.embeddings = np.array([], dtype=np.float32)
+        
+        # Conversation data
         self.history: list[dict] = []
         self.conversation_data = []
-        self.embeddings = np.array([], dtype=np.float32)
+        
+        # Logger
         self.logger = setup_logger(__name__)
         
-        self.logger.info("Coreon AI initialized")  
-                     
+        # Setup models
+        self._setup_models(ai_model, embedding_model)
+        
+        self.logger.info("Coreon AI initialized successfully")
+
+    def _setup_models(
+        self, 
+        ai_model: Optional[Union[str, List[str], List[AiModel]]],
+        embedding_model: Optional[Union[str, List[str], List[AiModel]]]
+    ):
+        """Setup models in a simplified way"""
+        
+        # Setup AI models
+        if ai_model:
+            if isinstance(ai_model, str):
+                model_obj = AiModel(model=ai_model)
+                self.ai_models[ai_model] = model_obj
+                self.main_ai_model = ai_model
+
+            elif isinstance(ai_model, list):
+                for model in ai_model:
+                    if model is None:
+                        continue
+
+                    if isinstance(model, str):
+                        model_name = model
+                        model_obj = AiModel(model=model)
+                        self.ai_models[model_name] = model_obj
+
+                        if self.main_ai_model is None:
+                            self.main_ai_model = model_name
+
+                    elif isinstance(model, AiModel):
+                        if model.model is None:
+                            continue
+                        self.ai_models[model.model] = model
+                        if self.main_ai_model is None:
+                            self.main_ai_model = model.model
+        
+        # Setup Embedding models
+        if embedding_model:
+            if isinstance(embedding_model, str):
+                model_obj = AiModel(embedding_model=embedding_model)
+                self.embed_models[embedding_model] = model_obj
+                self.main_embed_model = embedding_model
+
+            elif isinstance(embedding_model, list):
+                for embed_model in embedding_model:
+                    if embed_model is None:
+                        continue
+
+                    if isinstance(embed_model, str):
+                        embed_model_name = embed_model
+                        embed_model_obj = AiModel(embedding_model=embed_model)
+                        self.embed_models[embed_model_name] = embed_model_obj
+
+                        if self.main_embed_model is None:
+                            self.main_embed_model = embed_model_name
+
+                    elif isinstance(embed_model, AiModel):
+                        if embed_model.embedding_model is None:
+                            continue
+                        self.embed_models[embed_model.embedding_model] = embed_model
+                        if self.main_embed_model is None:
+                            self.main_embed_model = embed_model.embedding_model
+
+        self.logger.info(f"AI models: {list(self.ai_models.keys())}")
+        self.logger.info(f"Embed models: {list(self.embed_models.keys())}")
+
+    def _get_ai_model(self, model_name: Optional[str] = None) -> str:
+        """Get AI model name (uses main model if not specified)"""
+        if model_name and model_name in self.ai_models:
+            return model_name
+        elif self.main_ai_model:
+            self.logger.info(f"Using main AI model: {self.main_ai_model}")
+            return self.main_ai_model
+        else:
+            raise ValueError("No AI model available")
+
+    def _get_embed_model(self, model_name: Optional[str] = None) -> str:
+        """Get embedding model name (uses main model if not specified)"""
+        if model_name and model_name in self.embed_models:
+            return model_name
+        elif self.main_embed_model:
+            self.logger.info(f"Using main embedding model: {self.main_embed_model}")
+            return self.main_embed_model
+        else:
+            raise ValueError("No embedding model available")
+
+    async def init_database(self):
+        """Setup database"""
+        await self.db.init_db()
+
     async def load_conversation(self, chat_id: int):
-        """Loads conversation from the chat into the FAISS index."""
+        """Load conversation into FAISS index"""
         self.chat_id = chat_id
         self.conversation_data = await self.db.get_conversation(chat_id=chat_id)
         self.logger.info(f"Conversation loaded for chat {chat_id}")
+        
         self.faiss_index = faiss.IndexFlatL2(self.dimension)
         await self.load_vectors(chat_id=chat_id)
+        
         if not self.embeddings.size:
             self.logger.warning(f"No embeddings found for chat {chat_id}")
             return
-        self.faiss_index.add(self.embeddings) # type: ignore
-        self.logger.info(f"Conversation loaded into FAISS index{self.embeddings.shape}")  
-      
-    async def load_vectors(self, chat_id: Optional[int] = None):
-        """Returns the vectors of the chat id if not provided use self.chat_id."""
-        embeddings = []
-        if chat_id:
-            for embedding in await self.db.get_embeddings(chat_id=chat_id):
-                embeddings.append(embedding.vector)
-                
-        elif self.chat_id:
-            for embedding in await self.db.get_embeddings(chat_id=self.chat_id):
-                embeddings.append(embedding.vector)
-        else:
-            self.logger.warning("No chat id provided")
             
+        self.faiss_index.add(self.embeddings) # type: ignore
+        self.logger.info(f"Loaded {self.embeddings.shape[0]} embeddings into FAISS")
+
+    async def load_vectors(self, chat_id: Optional[int] = None):
+        """Load vectors for conversation"""
+        embeddings = []
+        target_chat_id = chat_id or self.chat_id
+        
+        if not target_chat_id:
+            self.logger.warning("No chat id provided")
+            return np.array([])
+            
+        for embedding in await self.db.get_embeddings(chat_id=target_chat_id):
+            embeddings.append(embedding.vector)
+                
         self.embeddings = np.array(embeddings, dtype=np.float32)
         return self.embeddings
-    
-    async def embed_text(self, text: str):
-        """Generates an embedding for the given text."""
-        try:
-            response = await self.client.embeddings(
-                model=self.embedding_model, prompt=text
-            )
-            return response.embedding
-        except Exception as e:
-            self.logger.error(f"Error getting embedding: {e}")
-            raise e
+
+    async def search_memory(
+        self, 
+        chat_id: int, 
+        query: str, 
+        embedding_model: Optional[str] = None, 
+        k: int = 5
+    ):
+        """Search memory using FAISS"""
         
-    async def search_memory(self, query: str, k: int = 5):
-        """Searches the FAISS index for relevant memories.
-
-        Args:
-            query (str): The search query.
-            k (int): The number of relevant memories to retrieve.
-
-        Returns:
-            Tuple[np.ndarray, np.ndarray]: Distances and indices of the nearest neighbors.
-        """
         if self.faiss_index is None or self.faiss_index.ntotal == 0:
-            self.logger.warning("FAISS index is not initialized or empty. No search will be performed.")
-            return np.array([[]]), np.array([[]])
-
+            self.logger.warning("FAISS index empty, loading conversation...")
+            await self.load_conversation(chat_id)
+        
         try:
-            query_embedding = await self.embed_text(query)
+            # Use specified model or main model
+            embed_model_name = self._get_embed_model(embedding_model)
+            
+            query_embedding = await self.embed_models[embed_model_name].embed_text(query)
             query_array = np.array([query_embedding], dtype=np.float32)
             faiss.normalize_L2(query_array)
 
             distances, indices = self.faiss_index.search(query_array, k=k) # type: ignore
-            self.logger.info(f"FAISS search results: Distances={distances}, Indices={indices}")
+            self.logger.info(f"Found {len(indices[0])} relevant messages")
             return distances, indices
-        
+ 
         except Exception as e:
             self.logger.error(f"Error during memory search: {e}")
             return np.array([[]]), np.array([[]])
-        
-    async def search_relevant(self, indices: np.ndarray, content: str="", user_role: str = "user"):
-        """Searches the conversation data for relevant messages."""
+
+    async def search_relevant(self, indices: np.ndarray, content: str = "", user_role: str = "user"):
+        """Build history from relevant messages"""
         self.history = []
         
         if not indices.any():
-            self.logger.warning(f"No relevant messages found for chat {self.chat_id}")
-            self.history.append({
-                "role": user_role, 
-                "content": content
-                })
+            self.logger.warning(f"No relevant messages found")
+            if content:
+                self.history.append({"role": user_role, "content": content})
             return
 
-        idx:int
+        # Add relevant messages
         for idx in indices[0]:
+            idx: int
             if 0 <= idx < len(self.conversation_data):
-                message_content = self.conversation_data[idx].message
-                message_role = self.conversation_data[idx].role
+                message = self.conversation_data[idx]
                 self.history.append({
-                    "role": message_role,
-                    "content": message_content
+                    "role": message.role,
+                    "content": message.message
                 })
 
+        # Add new message
         if content:
-            self.history.append({
-                "role": user_role, 
-                "content": content
-                })
+            self.history.append({"role": user_role, "content": content})
+            self.logger.info(f"Added new message to history: {content}\nhistory: {self.history}")
         else:
             self.logger.warning("No content provided for search_relevant")
 
     async def add_index(self, embed: list, message: Chat):
-        """Add a message to the FAISS index."""
+        """Add new message to FAISS index"""
         embedding_array = np.array([embed], dtype=np.float32)
         faiss.normalize_L2(embedding_array)
         self.faiss_index.add(embedding_array) # type: ignore
         self.conversation_data.append(message)
 
-    async def save_message(self, chat_id: int, role: str, content: str, embed):
-        """Saves messages to the database."""
+    async def save_message(
+        self, 
+        chat_id: int, 
+        role: str, 
+        content: str, 
+        ai_model: Optional[str] = None, 
+        embed_model: Optional[str] = None
+    ):
+        """Save message to database"""
+        
+        # Use specified models or main models
+        ai_model_name = self._get_ai_model(ai_model)
+        embed_model_name = self._get_embed_model(embed_model)
+        
+        # Save message
         message = await self.db.save_message(
             chat_id=chat_id, 
             role=role,
             message=content, 
-            model_name=self.ai_model
-            )
+            model_name=ai_model_name
+        )
         
-        embed = await self.db.save_embedding(
+        # Create and save embedding
+        embedding_vector = await self.embed_models[embed_model_name].embed_text(content)
+        embedding = await self.db.save_embedding(
             chat_id=chat_id, 
-            message_id=message.id,  # type: ignore
-            vector=embed,
-            )
-        await self.add_index(embed.vector, message) # type: ignore
-        return message, embed
-    
+            message_id=message.id, # type: ignore
+            vector=embedding_vector,
+        )
+        
+        # Add to FAISS index
+        await self.add_index(embedding.vector, message) # type: ignore
+        return message, embedding
+
     async def chat(
         self,
         chat_id: int,
         content: str,
+        ai_model: Optional[str] = None,
+        embed_model: Optional[str] = None,
         stream: bool = False,
+        k: int = 5,
         user_role: str = "user",
         assistant_role: str = "assistant"
     ):
-        """Generates a message from the AI model.
-            it loads the conversation into the FAISS index if it is not already loaded
-            search for the most relevant message in the conversation and use it as a prompt with the new message(content)
-            saves the content and response to the database
-        Args:
-            chat_id (int): The ID of the chat.
-            content (str): The content of the message.
-        """
-        
-        if self.faiss_index.ntotal == 0:
+        """Chat with AI - simplified and flexible"""
+
+        # Load conversation if not loaded
+        if self.faiss_index is None or self.faiss_index.ntotal == 0:
             await self.load_conversation(chat_id)
         
-        Distances, Indices = await self.search_memory(content, k=5)
-        await self.search_relevant(Indices, content=content)
-
-        ai_response_stream: AsyncIterator[ChatResponse] | ChatResponse
-        ai_response_stream = await self.client.chat(
-            model=self.ai_model,
-            messages=self.history,
-            stream=stream
+        # Search for relevant messages
+        distances, indices = await self.search_memory(
+            chat_id=chat_id, 
+            query=content, 
+            embedding_model=embed_model, 
+            k=k
         )
-        
-        self.logger.info(f"Generated response for chat {chat_id}")
-        
-        if stream:
-            self.logger.info(f"Streaming response for chat {chat_id}")
-            async for streaming_message in self._handle_streaming_response(
-                ai_response_stream=ai_response_stream, 
-                chat_id=chat_id, 
-                user_content=content,
-                user_role=user_role,
-                assistant_role=assistant_role
-            ):
-                yield streaming_message
-        else:
-            self.logger.info(f"Non-streaming response for chat {chat_id}")
-            complete_ai_response = await self._handle_non_streaming_response(
-                ai_response=ai_response_stream, 
-                chat_id=chat_id, 
-                user_content=content,
-                user_role=user_role,
-                assistant_role=assistant_role
-            )
-            
-            yield complete_ai_response
+        await self.search_relevant(indices, content=content, user_role=user_role)
 
+        # Get model name
+        ai_model_name = self._get_ai_model(ai_model)
+        
+        # Send to AI
+        ai_response = await self.ai_models[ai_model_name].chat(self.history, stream=stream)
+
+        self.logger.info(f"Generated response for chat {chat_id} using {ai_model_name}")
+
+        # Process response
+        if stream:
+            async for message in self._handle_streaming_response(
+                ai_response, chat_id, content, ai_model_name, embed_model, user_role, assistant_role
+            ):
+                yield message
+        else:
+            result = await self._handle_non_streaming_response(
+                ai_response, chat_id, content, ai_model_name, embed_model, user_role, assistant_role
+            )
+            yield result
 
     async def _handle_streaming_response(
         self, 
-        ai_response_stream: AsyncIterator[ChatResponse] | ChatResponse, 
+        ai_response_stream: AsyncIterator[ChatResponse] | ChatResponse,
         chat_id: int, 
         user_content: str,
-        user_role: str = "user",
-        assistant_role: str = "assistant"
-        ):
-        """Handles a streaming response from the AI model."""
-       
+        ai_model: str,
+        embed_model: Optional[str],
+        user_role: str,
+        assistant_role: str
+    ):
+        """Handle streaming response"""
         if isinstance(ai_response_stream, ChatResponse):
-            self.logger.error(f"AI response is not a stream for chat {chat_id}")
+            self.logger.error(f"Failed to generate response for chat {chat_id}")
             return
-        
         response_content_parts = []
         
+        # Return each part of the stream
         async for streaming_message in ai_response_stream:
             ai_content = streaming_message.message.content
             if ai_content:
                 response_content_parts.append(ai_content)
             yield streaming_message
         
-        await self.save_message(
-            chat_id=chat_id,
-            role=user_role,
-            content=user_content,
-            embed=await self.embed_text(user_content)
-        )
-        
+        # Save conversation
         complete_ai_response = "".join(response_content_parts)
-        
-        if complete_ai_response:
-            await self.save_message(
-                chat_id=chat_id, 
-                role=assistant_role,
-                content=complete_ai_response,
-                embed=await self.embed_text(complete_ai_response)
-            )
-            self.logger.info(f"Saved streaming conversation for chat {chat_id}")
-        else:
-            self.logger.error(f"No AI content to save for chat {chat_id}")
+        await self._save_conversation(
+            chat_id, user_content, complete_ai_response, 
+            ai_model, embed_model, user_role, assistant_role
+        )
 
     async def _handle_non_streaming_response(
         self, 
-        ai_response: AsyncIterator[ChatResponse] | ChatResponse, 
+        ai_response: ChatResponse | AsyncIterator[ChatResponse], 
         chat_id: int, 
         user_content: str,
-        user_role: str = "user",
-        assistant_role: str = "assistant"
-        ):
-        """Handles a non-streaming response from the AI model."""
-
+        ai_model: str,
+        embed_model: Optional[str],
+        user_role: str,
+        assistant_role: str
+    ):
+        """Handle non-streaming response"""
         if isinstance(ai_response, AsyncIterator):
-            self.logger.error(f"AI response is a stream for chat {chat_id}")
+            self.logger.error(f"Failed to generate response for chat {chat_id}")
             return
-        
         if not ai_response or not ai_response.message.content:
             self.logger.error(f"Failed to generate response for chat {chat_id}")
             return None
             
         complete_ai_response = ai_response.message.content
         
+        # Save conversation
+        await self._save_conversation(
+            chat_id, user_content, complete_ai_response, 
+            ai_model, embed_model, user_role, assistant_role
+        )
+        
+        return ai_response
+
+    async def _save_conversation(
+        self,
+        chat_id: int,
+        user_content: str,
+        ai_content: str,
+        ai_model: str,
+        embed_model: Optional[str],
+        user_role: str,
+        assistant_role: str
+    ):
+        """Save complete conversation"""
+        
+        # Save user message
         await self.save_message(
             chat_id=chat_id,
             role=user_role,
             content=user_content,
-            embed=await self.embed_text(user_content)
+            ai_model=ai_model,
+            embed_model=embed_model
         )
         
-        await self.save_message(
-            chat_id=chat_id,
-            role=assistant_role,
-            content=complete_ai_response,
-            embed=await self.embed_text(complete_ai_response)
-        )
-        
-        return ai_response
+        # Save AI response
+        if ai_content:
+            await self.save_message(
+                chat_id=chat_id, 
+                role=assistant_role,
+                content=ai_content,
+                ai_model=ai_model,
+                embed_model=embed_model
+            )
+            self.logger.info(f"Conversation saved for chat {chat_id}")
+        else:
+            self.logger.error(f"No AI content to save for chat {chat_id}")

@@ -9,7 +9,9 @@ It is part of the Coreon project, which is a chat application that uses AI model
 """
 
 from coreon.Ai.coreon import Coreon
+from coreon.Ai.coreon import AiModel
 from coreon.data.database import Database
+from coreon.data.basemodels import Chat, Conversation, Embedding
 from coreon.utils.log import setup_logger
 
 logger = setup_logger(__name__)

@@ -22,9 +22,9 @@ class Database:
         :param echo: If True, SQLAlchemy will log all the statements issued to stderr.
         """
         self.db_path = db_path
+        self.is_initialized = False
         self.logger = logging.getLogger(__name__)
     
-
         self.engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}", echo=echo)
         self.SessionLocal = async_sessionmaker(bind=self.engine, autoflush=True, expire_on_commit=False)
         
@@ -43,9 +43,19 @@ class Database:
             
     async def init_db(self):
         """Creates database tables if they don't exist."""
+        if self.is_initialized:
+            self.logger.info("Database already initialized.")
+            return
+            
         async with self.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+            self.is_initialized = True
             self.logger.info("Database tables created.")
+            
+    async def ensure_initialized(self):
+        """Ensure database is initialized before operations."""
+        if not self.is_initialized:
+            await self.init_db()
             
     @asynccontextmanager
     async def create_db_session(self):
@@ -54,6 +64,7 @@ class Database:
         
         :return: A session object to interact with the database.
         """
+        await self.ensure_initialized()
         db_session = self.SessionLocal()
         try:
             yield db_session
@@ -73,22 +84,23 @@ class Database:
         :param item: The item to insert.
         :return: The inserted item.
         """
+        await self.ensure_initialized()
         async with self.create_db_session() as db_session:
             db_session.add(item)
             await db_session.flush()
             await db_session.refresh(item)
             return item
 
-    async def create_chat(self, title: str = "Untitled chat")-> Chat:
+    async def create_chat(self, title: str = "Untitled chat") -> Chat:
         """
-        Create a new chat .
+        Create a new chat.
         
         :param title: Title of the chat.
         :return: The created chat object or None if creation failed.
         """
-        
+        await self.ensure_initialized()
         try:
-            # Create a new chat chat
+            # Create a new chat
             chat = Chat(title=title)
             
             await self.insert(chat)
@@ -104,26 +116,25 @@ class Database:
             role: str,
             message: str,
             model_name: str = "ai"
-        )-> Conversation:
-
+        ) -> Conversation:
         """Save a conversation message to the database.
         
         :param chat_id: ID of the chat.
         :param role: Role of the message (user or assistant).
-        :param content: Content of the message.
+        :param message: Content of the message.
         :param model_name: Name of the model used for the message.
         """
+        await self.ensure_initialized()
         try:
-            
-            message = Conversation(
+            message_obj = Conversation(
                 chat_id=chat_id,
                 role=role,
                 message=message,
                 model_name=model_name
             )
             
-            await self.insert(message)
-            return message
+            await self.insert(message_obj)
+            return message_obj
         except Exception as e:
             self.logger.error(f"Failed to save message: {e}")
             raise e
@@ -137,6 +148,7 @@ class Database:
         :param vector: Embedding vector.
         :param faiss_id: FAISS ID.
         """
+        await self.ensure_initialized()
         try:
             embedding = Embedding(
                 chat_id=chat_id,
@@ -158,6 +170,7 @@ class Database:
         :param chat_id: ID of the chat.
         :return: chat object or None if not found.
         """
+        await self.ensure_initialized()
         try:
             async with self.create_db_session() as db_session:
                 result = await db_session.execute(
@@ -177,6 +190,7 @@ class Database:
         
         :return: List of all chat objects.
         """
+        await self.ensure_initialized()
         try:
             async with self.create_db_session() as db_session:
                 result = await db_session.execute(
@@ -196,6 +210,7 @@ class Database:
         :param chat_id: ID of the chat.
         :return: List of Conversation objects or None if retrieval failed.
         """
+        await self.ensure_initialized()
         try:
             async with self.create_db_session() as db_session:
                 result = await db_session.execute(
@@ -216,6 +231,7 @@ class Database:
         :param chat_id: ID of the chat.
         :return: List of Embedding objects or [] if retrieval failed.
         """
+        await self.ensure_initialized()
         try:
             async with self.create_db_session() as db_session:
                 result = await db_session.execute(
