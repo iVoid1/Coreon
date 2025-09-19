@@ -36,8 +36,8 @@ class Conversation(Base):
     id = Column(Integer, primary_key=True)
     chat_id = Column(Integer, ForeignKey('chat.id'), nullable=False)
     model_name = Column(String(255), nullable=True)
-    role = Column(String(255), nullable=True)
-    message = Column(Text, nullable=True)
+    role = Column(String(255), nullable=False)
+    message = Column(Text, nullable=False)
     timestamp = Column(DateTime, default=datetime.now)
 
     chat = relationship("Chat", back_populates="conversations")

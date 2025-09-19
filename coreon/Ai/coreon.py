@@ -1,12 +1,12 @@
 import ollama
-from ollama import ChatResponse
+from ollama import ChatResponse, GenerateResponse
 
 import faiss
 import json
 import numpy as np
 import os
 
-from typing import Optional
+from typing import Optional, AsyncGenerator, AsyncIterator
 
 from coreon.data.basemodels import Chat, Conversation, Embedding
 from coreon.data.database import Database
@@ -123,26 +123,35 @@ class Coreon:
             self.logger.error(f"Error during memory search: {e}")
             return np.array([[]]), np.array([[]])
         
-    async def search_relevant(self, indices: np.ndarray, content: str=""):
-        # self.history = []
-        if indices.any():
-            idx:int
-            for idx in indices[0]:
-                if 0 <= idx < len(self.conversation_data):
-                    message_content = self.conversation_data[idx].message
-                    message_role = self.conversation_data[idx].role
-                    self.history.append({
-                        "role": message_role,
-                        "content": message_content
-                    })
-
-            if content:
-                self.history.append({"role": "user", "content": content})
-            else:
-                self.logger.warning("No content provided for search_relevant")
-
-        else:
+    async def search_relevant(self, indices: np.ndarray, content: str="", user_role: str = "user"):
+        """Searches the conversation data for relevant messages."""
+        self.history = []
+        
+        if not indices.any():
             self.logger.warning(f"No relevant messages found for chat {self.chat_id}")
+            self.history.append({
+                "role": user_role, 
+                "content": content
+                })
+            return
+
+        idx:int
+        for idx in indices[0]:
+            if 0 <= idx < len(self.conversation_data):
+                message_content = self.conversation_data[idx].message
+                message_role = self.conversation_data[idx].role
+                self.history.append({
+                    "role": message_role,
+                    "content": message_content
+                })
+
+        if content:
+            self.history.append({
+                "role": user_role, 
+                "content": content
+                })
+        else:
+            self.logger.warning("No content provided for search_relevant")
 
     async def add_index(self, embed: list, message: Chat):
         """Add a message to the FAISS index."""
@@ -151,7 +160,7 @@ class Coreon:
         self.faiss_index.add(embedding_array) # type: ignore
         self.conversation_data.append(message)
 
-    async def save_message(self, chat_id: int, content: str, role: str, ):
+    async def save_message(self, chat_id: int, role: str, content: str, embed):
         """Saves messages to the database."""
         message = await self.db.save_message(
             chat_id=chat_id, 
@@ -163,7 +172,7 @@ class Coreon:
         embed = await self.db.save_embedding(
             chat_id=chat_id, 
             message_id=message.id,  # type: ignore
-            vector=await self.embed_text(content),
+            vector=embed,
             )
         await self.add_index(embed.vector, message) # type: ignore
         return message, embed
@@ -172,6 +181,9 @@ class Coreon:
         self,
         chat_id: int,
         content: str,
+        stream: bool = False,
+        user_role: str = "user",
+        assistant_role: str = "assistant"
     ):
         """Generates a message from the AI model.
             it loads the conversation into the FAISS index if it is not already loaded
@@ -181,47 +193,119 @@ class Coreon:
             chat_id (int): The ID of the chat.
             content (str): The content of the message.
         """
-
+        
         if self.faiss_index.ntotal == 0:
             await self.load_conversation(chat_id)
+        
+        Distances, Indices = await self.search_memory(content, k=5)
+        await self.search_relevant(Indices, content=content)
 
-        D, I = await self.search_memory(content, k=5)
-        await self.search_relevant(I, content=content)
-            
-        response = await self.client.chat(
+        ai_response_stream: AsyncIterator[ChatResponse] | ChatResponse
+        ai_response_stream = await self.client.chat(
             model=self.ai_model,
             messages=self.history,
-            stream=True
-            )
-        self.logger.info(f"Generated response for chat {chat_id}")
-
-        message_response = []
-        async for message in response:
-            message_response.append(message.message.content)
-            yield message
-
-
-        user_message, user_embedding = await self.save_message(
-            chat_id=chat_id, 
-            content=content,
-            role="user"
-            )
-        if user_message or user_embedding:
-            self.logger.info(f"Saved user message for chat {chat_id}")
-        else:
-            self.logger.warning(f"Failed to save user message for chat {chat_id}")
-            
-        if message_response:
-            ai_message, ai_embedding = await self.save_message(
-                chat_id=chat_id, 
-                content="".join(message_response),
-                role="assistant"
-                )
+            stream=stream
+        )
         
-            if ai_message and ai_embedding:
-                self.logger.info(f"Saved AI message for chat {chat_id}")
-            else:
-                self.logger.warning(f"Failed to save AI message for chat {chat_id}")
+        self.logger.info(f"Generated response for chat {chat_id}")
+        
+        if stream:
+            self.logger.info(f"Streaming response for chat {chat_id}")
+            async for streaming_message in self._handle_streaming_response(
+                ai_response_stream=ai_response_stream, 
+                chat_id=chat_id, 
+                user_content=content,
+                user_role=user_role,
+                assistant_role=assistant_role
+            ):
+                yield streaming_message
         else:
-            self.logger.warning(f"Failed to generate response for chat {chat_id}")
-        yield ai_message
+            self.logger.info(f"Non-streaming response for chat {chat_id}")
+            complete_ai_response = await self._handle_non_streaming_response(
+                ai_response=ai_response_stream, 
+                chat_id=chat_id, 
+                user_content=content,
+                user_role=user_role,
+                assistant_role=assistant_role
+            )
+            
+            yield complete_ai_response
+
+
+    async def _handle_streaming_response(
+        self, 
+        ai_response_stream: AsyncIterator[ChatResponse] | ChatResponse, 
+        chat_id: int, 
+        user_content: str,
+        user_role: str = "user",
+        assistant_role: str = "assistant"
+        ):
+        """Handles a streaming response from the AI model."""
+       
+        if isinstance(ai_response_stream, ChatResponse):
+            self.logger.error(f"AI response is not a stream for chat {chat_id}")
+            return
+        
+        response_content_parts = []
+        
+        async for streaming_message in ai_response_stream:
+            ai_content = streaming_message.message.content
+            if ai_content:
+                response_content_parts.append(ai_content)
+            yield streaming_message
+        
+        await self.save_message(
+            chat_id=chat_id,
+            role=user_role,
+            content=user_content,
+            embed=await self.embed_text(user_content)
+        )
+        
+        complete_ai_response = "".join(response_content_parts)
+        
+        if complete_ai_response:
+            await self.save_message(
+                chat_id=chat_id, 
+                role=assistant_role,
+                content=complete_ai_response,
+                embed=await self.embed_text(complete_ai_response)
+            )
+            self.logger.info(f"Saved streaming conversation for chat {chat_id}")
+        else:
+            self.logger.error(f"No AI content to save for chat {chat_id}")
+
+    async def _handle_non_streaming_response(
+        self, 
+        ai_response: AsyncIterator[ChatResponse] | ChatResponse, 
+        chat_id: int, 
+        user_content: str,
+        user_role: str = "user",
+        assistant_role: str = "assistant"
+        ):
+        """Handles a non-streaming response from the AI model."""
+
+        if isinstance(ai_response, AsyncIterator):
+            self.logger.error(f"AI response is a stream for chat {chat_id}")
+            return
+        
+        if not ai_response or not ai_response.message.content:
+            self.logger.error(f"Failed to generate response for chat {chat_id}")
+            return None
+            
+        complete_ai_response = ai_response.message.content
+        
+        await self.save_message(
+            chat_id=chat_id,
+            role=user_role,
+            content=user_content,
+            embed=await self.embed_text(user_content)
+        )
+        
+        await self.save_message(
+            chat_id=chat_id,
+            role=assistant_role,
+            content=complete_ai_response,
+            embed=await self.embed_text(complete_ai_response)
+        )
+        
+        return ai_response

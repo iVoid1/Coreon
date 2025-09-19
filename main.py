@@ -1,8 +1,6 @@
 import asyncio
 
-from coreon.data.database import Database, Conversation
-from coreon.Ai.coreon import Coreon
-from coreon.utils.log import setup_logger
+from coreon import Database, Coreon, setup_logger
 
 logger = setup_logger(__name__)
 
@@ -23,7 +21,6 @@ async def main():
     # Initialize components
     db = Database("coreon/coreon.sqlite")
     await db.init_db()
-
     coreon = Coreon(db=db, ai_model="gemma3:12b", embed_model="nomic-embed-text:latest", dimension=768, host="http://localhost:11434")
 
     # Create Chat
@@ -31,6 +28,7 @@ async def main():
     if chat is None:
         logger.error("Failed to create chat. Exiting.")
         chat = await db.create_chat(title="Coreon Chat")    
+
     logger.info(f"Chat started - Chat: {chat.id}")
     print("Chat with Coreon (type 'exit' to quit, 'clear' to clear screen)")
     
@@ -49,16 +47,13 @@ async def main():
                 clear_screen()
                 continue
             
-            #TODO: Get AI response
             print(f"Coreon: ", end="", flush=True)
             async for response in coreon.chat(
                                 chat_id=chat.id,    # type: ignore
-                                content=user_input
-                                ):
-                if isinstance(response, Conversation):
-                    ai_response = response
-                else:
-                    print(response.message.content, end="", flush=True)
+                                content=user_input,
+                                stream=True
+                                ):    
+                print(response.message.content, end="", flush=True) # type: ignore
             print()
         except KeyboardInterrupt:
             logger.info("Chat interrupted by user")
