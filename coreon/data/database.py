@@ -1,12 +1,11 @@
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlalchemy import event, select
+
 from contextlib import asynccontextmanager
-from typing import Optional, Union
-from datetime import datetime
-import logging
+from typing import Union
 
-from coreon.data.basemodels import Base, Chat, Conversation, Embedding
-
+from coreon.data import Base, Chat, Conversation, Embedding
+from coreon.utils import setup_logger
 
 class Database:
     """
@@ -23,7 +22,7 @@ class Database:
         """
         self.db_path = db_path
         self.is_initialized = False
-        self.logger = logging.getLogger(__name__)
+        self.logger = setup_logger(__name__)
     
         self.engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}", echo=echo)
         self.SessionLocal = async_sessionmaker(bind=self.engine, autoflush=True, expire_on_commit=False)

@@ -3,10 +3,10 @@ import numpy as np
 from ollama import ChatResponse
 from typing import Optional, AsyncIterator, Union, List
 
-from coreon.data.database import Database
-from coreon.data.basemodels import Chat
-from coreon.Ai.model import AiModel
-from coreon.utils.log import setup_logger
+from coreon.data import Database
+from coreon.data import Chat
+from coreon.Ai import AiModel
+from coreon.utils import setup_logger
 
 logger = setup_logger(__name__)
 

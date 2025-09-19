@@ -8,11 +8,11 @@ It is designed to be used in a chat application context, where users can send me
 It is part of the Coreon project, which is a chat application that uses AI models for conversation.
 """
 
-from coreon.Ai.coreon import Coreon
-from coreon.Ai.coreon import AiModel
-from coreon.data.database import Database
-from coreon.data.basemodels import Chat, Conversation, Embedding
-from coreon.utils.log import setup_logger
+from coreon.Ai import Coreon
+from coreon.Ai import AiModel
+from coreon.data import Database
+from coreon.data import Chat, Conversation, Embedding
+from coreon.utils import setup_logger
 
 logger = setup_logger(__name__)
 
