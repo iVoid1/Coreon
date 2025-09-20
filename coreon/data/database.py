@@ -1,10 +1,9 @@
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlalchemy import event, select
-
 from contextlib import asynccontextmanager
-from typing import Union
+from typing import Union, Optional, List
 
-from coreon.data import Base, Chat, Conversation, Embedding
+from coreon.data import Base, Chat, Conversation, Embedding, ContentType
 from coreon.utils import setup_logger
 
 class Database:
@@ -45,17 +44,25 @@ class Database:
         if self.is_initialized:
             self.logger.info("Database already initialized.")
             return
-            
-        async with self.engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-            self.is_initialized = True
-            self.logger.info("Database tables created.")
-            
+        try:
+            async with self.engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+                self.is_initialized = True
+                self.logger.info("Database tables created.")
+        except Exception as e:
+            self.logger.error(f"Failed to initialize database: {e}")
+            await self.close()
     async def ensure_initialized(self):
         """Ensure database is initialized before operations."""
         if not self.is_initialized:
             await self.init_db()
             
+    async def close(self):
+        """Close the database connection."""
+        await self.engine.dispose()
+        await self.SessionLocal().close_all()
+        self.logger.info("Database connection closed.")
+         
     @asynccontextmanager
     async def create_db_session(self):
         """
@@ -90,32 +97,65 @@ class Database:
             await db_session.refresh(item)
             return item
 
+    # Chat operations
     async def create_chat(self, title: str = "Untitled chat") -> Chat:
         """
         Create a new chat.
         
         :param title: Title of the chat.
-        :return: The created chat object or None if creation failed.
+        :return: The created chat object.
         """
         await self.ensure_initialized()
         try:
-            # Create a new chat
             chat = Chat(title=title)
-            
             await self.insert(chat)
             self.logger.info(f"Created chat: {chat.id} - '{chat.title}'")                
             return chat
         except Exception as e:
             self.logger.error(f"Failed to create chat: {e}")
             raise e
-  
+    
+    async def get_chat(self, chat_id: int) -> Optional[Chat]:
+        """
+        Get a chat by its ID.
+        
+        :param chat_id: ID of the chat.
+        :return: Chat object or None if not found.
+        """
+        await self.ensure_initialized()
+        try:
+            async with self.create_db_session() as db_session:
+                result = await db_session.execute(
+                    select(Chat).where(Chat.id == chat_id)
+                )
+                return result.scalars().first()
+        except Exception as e:
+            self.logger.error(f"Failed to get chat by ID: {e}")
+            raise e
+
+    async def get_all_chats(self) -> List[Chat]:
+        """
+        Get all chats in the database.
+        
+        :return: List of all chat objects.
+        """
+        await self.ensure_initialized()
+        try:
+            async with self.create_db_session() as db_session:
+                result = await db_session.execute(select(Chat))
+                return list(result.scalars().all())
+        except Exception as e:
+            self.logger.error(f"Failed to get all chats: {e}")
+            return []
+
+    # Conversation operations
     async def save_message(
-            self,
-            chat_id: int,
-            role: str,
-            message: str,
-            model_name: str = "ai"
-        ) -> Conversation:
+        self,
+        chat_id: int,
+        role: str,
+        message: str,
+        model_name: str = "ai"
+    ) -> Conversation:
         """Save a conversation message to the database.
         
         :param chat_id: ID of the chat.
@@ -137,77 +177,14 @@ class Database:
         except Exception as e:
             self.logger.error(f"Failed to save message: {e}")
             raise e
-        
-    async def save_embedding(self, chat_id: int, message_id: int, vector, faiss_id=None) -> Embedding:
-        """
-        Create embeddings for conversation history.
-        
-        :param chat_id: ID of the chat.
-        :param message_id: ID of the message.
-        :param vector: Embedding vector.
-        :param faiss_id: FAISS ID.
-        """
-        await self.ensure_initialized()
-        try:
-            embedding = Embedding(
-                chat_id=chat_id,
-                message_id=message_id,
-                vector=vector,
-                faiss_id=faiss_id
-                )
-            await self.insert(embedding)
-            self.logger.debug(f"Inserted embeddings for message {embedding.message_id}")
-            return embedding
-        except Exception as e:
-            self.logger.error(f"Failed to insert embeddings: {e}")
-            raise e
 
-    async def get_chat(self, chat_id: int) -> Chat:
-        """
-        Get a chat by its ID.
-        
-        :param chat_id: ID of the chat.
-        :return: chat object or None if not found.
-        """
-        await self.ensure_initialized()
-        try:
-            async with self.create_db_session() as db_session:
-                result = await db_session.execute(
-                    select(Chat).where(
-                        Chat.id == chat_id
-                        )
-                )
-                chat = result.scalars().first()
-                return chat
-        except Exception as e:
-            self.logger.error(f"Failed to get chat by ID: {e}")
-            raise e
-
-    async def get_all_chats(self) -> list[Chat]:
-        """
-        Get all chats in the database.
-        
-        :return: List of all chat objects.
-        """
-        await self.ensure_initialized()
-        try:
-            async with self.create_db_session() as db_session:
-                result = await db_session.execute(
-                    select(Chat)
-                    )
-                chats = list(result.scalars().all())
-                return chats
-        except Exception as e:
-            self.logger.error(f"Failed to get all chats: {e}")
-            return []
-
-    async def get_conversation(self, chat_id: int) -> list[Conversation]:
+    async def get_conversation(self, chat_id: int) -> List[Conversation]:
         """
         Get conversation history for a chat.
         Retrieves all messages in the chat ordered by timestamp.
         
         :param chat_id: ID of the chat.
-        :return: List of Conversation objects or None if retrieval failed.
+        :return: List of Conversation objects.
         """
         await self.ensure_initialized()
         try:
@@ -215,36 +192,102 @@ class Database:
                 result = await db_session.execute(
                     select(Conversation).where(
                         Conversation.chat_id == chat_id
-                        ).order_by(Conversation.timestamp)
+                    ).order_by(Conversation.timestamp)
                 )
-                conversations = list(result.scalars().all())
-                return conversations
+                return list(result.scalars().all())
         except Exception as e:
             self.logger.error(f"Failed to get conversation: {e}")
             return []
+
+    # Embedding operations
+    async def save_embedding(
+        self, 
+        chat_id: int,
+        content_type: ContentType,
+        content_id: int,
+        embedding_model: str,
+        vector,
+        faiss_id: Optional[int] = None
         
-    async def get_embeddings(self, chat_id: int) -> list[Embedding]:
+    ) -> Embedding:
         """
-        Get embeddings for a chat.
+        Save embedding for any content type.
         
-        :param chat_id: ID of the chat.
-        :return: List of Embedding objects or [] if retrieval failed.
+        :param content_type: Type of content (conversation, search, memory).
+        :param content_id: ID of the content.
+        :param vector: Embedding vector.
+        :param chat_id: Optional chat ID for organization.
+        :param embedding_model: Model used for embedding.
+        :param faiss_id: FAISS ID for vector search.
+        """
+        await self.ensure_initialized()
+        try:
+            embedding = Embedding(
+                chat_id=chat_id,
+                content_type=content_type,
+                content_id=content_id,
+                embedding_model=embedding_model,
+                vector=vector,
+                faiss_id=faiss_id
+            )
+            await self.insert(embedding)
+            self.logger.debug(f"Inserted embedding for {content_type.value} {content_id}")
+            return embedding
+        except Exception as e:
+            self.logger.error(f"Failed to insert embedding: {e}")
+            raise e
+
+    async def get_embeddings(
+        self, 
+        chat_id: Optional[int] = None,
+        content_type: Optional[ContentType] = None
+    ) -> List[Embedding]:
+        """
+        Get embeddings with optional filters.
+        
+        :param chat_id: Filter by chat ID.
+        :param content_type: Filter by content type.
+        :return: List of Embedding objects.
+        """
+        await self.ensure_initialized()
+        try:
+            async with self.create_db_session() as db_session:
+                query = select(Embedding)
+                
+                if chat_id is not None:
+                    query = query.where(Embedding.chat_id == chat_id)
+                if content_type is not None:
+                    query = query.where(Embedding.content_type == content_type)
+                    
+                result = await db_session.execute(query)
+                return list(result.scalars().all())
+        except Exception as e:
+            self.logger.error(f"Failed to get embeddings: {e}")
+            return []
+
+    async def get_embedding_by_content(
+        self, 
+        content_type: ContentType, 
+        content_id: int
+    ) -> Optional[Embedding]:
+        """
+        Get embedding for specific content.
+        
+        :param content_type: Type of content.
+        :param content_id: ID of the content.
+        :return: Embedding object or None.
         """
         await self.ensure_initialized()
         try:
             async with self.create_db_session() as db_session:
                 result = await db_session.execute(
                     select(Embedding).where(
-                        Embedding.chat_id == chat_id
-                        )
+                        Embedding.content_type == content_type,
+                        Embedding.content_id == content_id
+                    )
                 )
-                embeddings = list(result.scalars().all())
-                return embeddings
+                return result.scalars().first()
         except Exception as e:
-            self.logger.error(f"Failed to get embeddings: {e}")
-            return []
+            self.logger.error(f"Failed to get embedding: {e}")
+            return None
 
-    async def close(self):
-        """Close the database connection."""
-        await self.engine.dispose()
-        self.logger.info("Database connection closed.")
