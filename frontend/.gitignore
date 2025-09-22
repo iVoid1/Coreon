@@ -1,11 +1,3 @@
-__pycache__/
-.vscode/
-*feature/
-*.db
-*.sqlite
-test*
-*.json
-*vosk*
 # Logs
 logs
 *.log

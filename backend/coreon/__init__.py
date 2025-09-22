@@ -11,7 +11,8 @@ It is part of the Coreon project, which is a chat application that uses AI model
 from coreon.Ai import Coreon
 from coreon.Ai import AiModel
 from coreon.data import Database
-from coreon.data import Chat, Conversation, Embedding
+from coreon.data import Chat, Conversation, Embedding, ContentType
+from coreon.data import ChatBase, ConversationBase, EmbeddingBase
 from coreon.utils import setup_logger
 
 logger = setup_logger(__name__)

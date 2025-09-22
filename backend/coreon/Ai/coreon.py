@@ -259,7 +259,7 @@ class Coreon:
         embedding = await self.db.save_embedding(
             chat_id=chat_id,
             content_type=ContentType.CONVERSATION,
-            content_id=message.id, # type: ignore
+            conversation_id=message.id, # type: ignore
             embedding_model=embed_model_name,
             vector=embedding_vector
         )

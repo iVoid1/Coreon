@@ -38,7 +38,12 @@ class Database:
             cursor = dbapi_connection.cursor()
             cursor.execute("PRAGMA foreign_keys=ON")
             cursor.close()
-            
+      
+    async def connect(self):
+        """Connect to the database."""
+        await self.engine.connect()
+        self.logger.info("Database connected.")
+              
     async def init_db(self):
         """Creates database tables if they don't exist."""
         if self.is_initialized:
@@ -204,7 +209,7 @@ class Database:
         self, 
         chat_id: int,
         content_type: ContentType,
-        content_id: int,
+        conversation_id: int,
         embedding_model: str,
         vector,
         faiss_id: Optional[int] = None
@@ -225,13 +230,13 @@ class Database:
             embedding = Embedding(
                 chat_id=chat_id,
                 content_type=content_type,
-                content_id=content_id,
+                conversation_id=conversation_id,
                 embedding_model=embedding_model,
                 vector=vector,
                 faiss_id=faiss_id
             )
             await self.insert(embedding)
-            self.logger.debug(f"Inserted embedding for {content_type.value} {content_id}")
+            self.logger.debug(f"Inserted embedding for {content_type.value} {conversation_id}")
             return embedding
         except Exception as e:
             self.logger.error(f"Failed to insert embedding: {e}")
