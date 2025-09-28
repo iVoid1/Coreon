@@ -3,7 +3,7 @@ from sqlalchemy import event, select
 from contextlib import asynccontextmanager
 from typing import Union, Optional, List
 
-from coreon.data import Base, Chat, Conversation, Embedding, ContentType
+from coreon.data import Base, Chat, Message, Embedding, ContentType
 from coreon.utils import setup_logger
 
 class Database:
@@ -38,11 +38,6 @@ class Database:
             cursor = dbapi_connection.cursor()
             cursor.execute("PRAGMA foreign_keys=ON")
             cursor.close()
-      
-    async def connect(self):
-        """Connect to the database."""
-        await self.engine.connect()
-        self.logger.info("Database connected.")
               
     async def init_db(self):
         """Creates database tables if they don't exist."""
@@ -57,6 +52,7 @@ class Database:
         except Exception as e:
             self.logger.error(f"Failed to initialize database: {e}")
             await self.close()
+    
     async def ensure_initialized(self):
         """Ensure database is initialized before operations."""
         if not self.is_initialized:
@@ -70,25 +66,21 @@ class Database:
          
     @asynccontextmanager
     async def create_db_session(self):
-        """
-        Context manager for database sessions.
-        
-        :return: A session object to interact with the database.
-        """
         await self.ensure_initialized()
         db_session = self.SessionLocal()
         try:
             yield db_session
-            db_session.expunge_all()  # Clear the session cache
             await db_session.commit()
         except Exception as e:
             await db_session.rollback()
             self.logger.error(f"Session rollback due to error: {e}")
-            raise
+            raise e
         finally:
+            db_session.expunge_all()
+            db_session.expire_all()
             await db_session.close()
 
-    async def insert(self, item: Union[Chat, Conversation, Embedding]):
+    async def insert(self, item: Union[Chat, Message, Embedding]):
         """
         Insert an item into the database.
         
@@ -133,7 +125,12 @@ class Database:
                 result = await db_session.execute(
                     select(Chat).where(Chat.id == chat_id)
                 )
-                return result.scalars().first()
+                chat = result.scalars().first()
+                if chat:
+                    self.logger.debug(f"Found chat: {chat.id} - '{chat.title}'")
+                else:
+                    self.logger.debug(f"Chat {chat_id} not found")
+                return chat
         except Exception as e:
             self.logger.error(f"Failed to get chat by ID: {e}")
             raise e
@@ -148,20 +145,61 @@ class Database:
         try:
             async with self.create_db_session() as db_session:
                 result = await db_session.execute(select(Chat))
-                return list(result.scalars().all())
+                chats = list(result.scalars().all())
+                self.logger.debug(f"Retrieved {len(chats)} chats from database")
+                return chats
         except Exception as e:
             self.logger.error(f"Failed to get all chats: {e}")
             return []
 
-    # Conversation operations
+    async def chat_exists(self, chat_id: int) -> bool:
+        """
+        Quick check if chat exists
+        
+        :param chat_id: ID of the chat to check.
+        :return: True if chat exists, False otherwise.
+        """
+        try:
+            chat = await self.get_chat(chat_id)
+            return chat is not None
+        except Exception as e:
+            self.logger.error(f"Error checking if chat {chat_id} exists: {e}")
+            return False
+
+    async def delete_chat(self, chat_id: int) -> bool:
+        """
+        Delete a chat by its ID.
+        
+        :param chat_id: ID of the chat to delete.
+        :return: True if deleted, False otherwise.
+        """
+        await self.ensure_initialized()
+        try:
+            async with self.create_db_session() as db_session:
+                result = await db_session.execute(
+                    select(Chat).where(Chat.id == chat_id)
+                )
+                chat = result.scalars().first()
+                if chat:
+                    await db_session.delete(chat)
+                    self.logger.info(f"Deleted chat: {chat_id}")
+                    return True
+                else:
+                    self.logger.warning(f"Chat not found for deletion: {chat_id}")
+                    return False
+        except Exception as e:
+            self.logger.error(f"Failed to delete chat: {e}")
+            return False
+    
+    # Message operations
     async def save_message(
         self,
         chat_id: int,
         role: str,
         message: str,
-        model_name: str = "ai"
-    ) -> Conversation:
-        """Save a conversation message to the database.
+        model_name: Optional[str] = "assistant"
+    ) -> Message:
+        """Save a Message message to the database.
         
         :param chat_id: ID of the chat.
         :param role: Role of the message (user or assistant).
@@ -170,46 +208,91 @@ class Database:
         """
         await self.ensure_initialized()
         try:
-            message_obj = Conversation(
+            message_obj = Message(
                 chat_id=chat_id,
                 role=role,
                 message=message,
                 model_name=model_name
             )
-            
             await self.insert(message_obj)
+            self.logger.debug(f"Saved message for chat {chat_id}: {role}")
             return message_obj
         except Exception as e:
             self.logger.error(f"Failed to save message: {e}")
             raise e
 
-    async def get_conversation(self, chat_id: int) -> List[Conversation]:
+    async def get_message(self, chat_id: int) -> List[Message]:
         """
-        Get conversation history for a chat.
+        Get Message history for a chat.
         Retrieves all messages in the chat ordered by timestamp.
         
         :param chat_id: ID of the chat.
-        :return: List of Conversation objects.
+        :return: List of Message objects.
         """
         await self.ensure_initialized()
         try:
             async with self.create_db_session() as db_session:
                 result = await db_session.execute(
-                    select(Conversation).where(
-                        Conversation.chat_id == chat_id
-                    ).order_by(Conversation.timestamp)
+                    select(Message).where(
+                        Message.chat_id == chat_id
+                    ).order_by(Message.timestamp)
                 )
-                return list(result.scalars().all())
+                messages = list(result.scalars().all())
+                self.logger.debug(f"Retrieved {len(messages)} messages for chat {chat_id}")
+                return messages
         except Exception as e:
-            self.logger.error(f"Failed to get conversation: {e}")
+            self.logger.error(f"Failed to get Message: {e}")
             return []
 
+    async def get_message_by_id(self, message_id: int) -> Optional[Message]:
+        """
+        Get a Message by its ID.
+        
+        :param message_id: ID of the Message.
+        :return: Message object or None if not found.
+        """
+        await self.ensure_initialized()
+        try:
+            async with self.create_db_session() as db_session:
+                result = await db_session.execute(
+                    select(Message).where(Message.id == message_id)
+                )
+                return result.scalars().first()
+        except Exception as e:
+            self.logger.error(f"Failed to get Message by ID: {e}")
+            raise e
+        
+    async def delete_message(self, message_id: int) -> bool:
+        """
+        Delete a Message by its ID.
+        
+        :param message_id: ID of the Message to delete.
+        :return: True if deleted, False otherwise.
+        """
+        await self.ensure_initialized()
+        try:
+            async with self.create_db_session() as db_session:
+                result = await db_session.execute(
+                    select(Message).where(Message.id == message_id)
+                )
+                message = result.scalars().first()
+                if message:  # Fixed bug in original code (was Message instead of message)
+                    await db_session.delete(message)
+                    self.logger.info(f"Deleted Message: {message_id}")
+                    return True
+                else:
+                    self.logger.warning(f"Message not found for deletion: {message_id}")
+                    return False
+        except Exception as e:
+            self.logger.error(f"Failed to delete Message: {e}")
+            return False
+    
     # Embedding operations
     async def save_embedding(
         self, 
         chat_id: int,
         content_type: ContentType,
-        conversation_id: int,
+        message_id: int,
         embedding_model: str,
         vector,
         faiss_id: Optional[int] = None
@@ -218,8 +301,8 @@ class Database:
         """
         Save embedding for any content type.
         
-        :param content_type: Type of content (conversation, search, memory).
-        :param content_id: ID of the content.
+        :param content_type: Type of content (Message, search, memory).
+        :param message_id: ID of the content.
         :param vector: Embedding vector.
         :param chat_id: Optional chat ID for organization.
         :param embedding_model: Model used for embedding.
@@ -230,13 +313,13 @@ class Database:
             embedding = Embedding(
                 chat_id=chat_id,
                 content_type=content_type,
-                conversation_id=conversation_id,
+                message_id=message_id,
                 embedding_model=embedding_model,
                 vector=vector,
                 faiss_id=faiss_id
             )
             await self.insert(embedding)
-            self.logger.debug(f"Inserted embedding for {content_type.value} {conversation_id}")
+            self.logger.debug(f"Inserted embedding for {content_type.value} {message_id}")
             return embedding
         except Exception as e:
             self.logger.error(f"Failed to insert embedding: {e}")
@@ -245,7 +328,6 @@ class Database:
     async def get_embeddings(
         self, 
         chat_id: Optional[int] = None,
-        content_type: Optional[ContentType] = None
     ) -> List[Embedding]:
         """
         Get embeddings with optional filters.
@@ -256,30 +338,26 @@ class Database:
         """
         await self.ensure_initialized()
         try:
-            async with self.create_db_session() as db_session:
-                query = select(Embedding)
-                
-                if chat_id is not None:
-                    query = query.where(Embedding.chat_id == chat_id)
-                if content_type is not None:
-                    query = query.where(Embedding.content_type == content_type)
-                    
-                result = await db_session.execute(query)
+            async with self.create_db_session() as db_session:                      
+                result = await db_session.execute(
+                    select(Embedding).where(
+                        (Embedding.chat_id == chat_id)
+                    ).order_by(Embedding.timestamp)
+                )
                 return list(result.scalars().all())
         except Exception as e:
             self.logger.error(f"Failed to get embeddings: {e}")
             return []
 
-    async def get_embedding_by_content(
+    async def get_embedding_by_message(
         self, 
-        content_type: ContentType, 
-        content_id: int
+        message_id: int
     ) -> Optional[Embedding]:
         """
         Get embedding for specific content.
         
         :param content_type: Type of content.
-        :param content_id: ID of the content.
+        :param message_id: ID of the content.
         :return: Embedding object or None.
         """
         await self.ensure_initialized()
@@ -287,8 +365,7 @@ class Database:
             async with self.create_db_session() as db_session:
                 result = await db_session.execute(
                     select(Embedding).where(
-                        Embedding.content_type == content_type,
-                        Embedding.content_id == content_id
+                        Embedding.message_id == message_id
                     )
                 )
                 return result.scalars().first()
@@ -296,3 +373,27 @@ class Database:
             self.logger.error(f"Failed to get embedding: {e}")
             return None
 
+    async def delete_embedding(self, embedding_id: int) -> bool:
+        """
+        Delete an embedding by its ID.
+        
+        :param embedding_id: ID of the embedding to delete.
+        :return: True if deleted, False otherwise.
+        """
+        await self.ensure_initialized()
+        try:
+            async with self.create_db_session() as db_session:
+                result = await db_session.execute(
+                    select(Embedding).where(Embedding.id == embedding_id)
+                )
+                embedding = result.scalars().first()
+                if embedding:
+                    await db_session.delete(embedding)
+                    self.logger.info(f"Deleted embedding: {embedding_id}")
+                    return True
+                else:
+                    self.logger.warning(f"Embedding not found for deletion: {embedding_id}")
+                    return False
+        except Exception as e:
+            self.logger.error(f"Failed to delete embedding: {e}")
+            return False

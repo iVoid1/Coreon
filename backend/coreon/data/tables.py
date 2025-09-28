@@ -8,7 +8,7 @@ Base = declarative_base()
 
 class ContentType(Enum):
     """Valid content types for embeddings"""
-    CONVERSATION = "conversation"
+    MESSAGE = "message"
     SEARCH = "search"
     MEMORY = "memory"
 
@@ -26,8 +26,8 @@ class Chat(Base):
     last_active_at = Column(DateTime, default=datetime.now)
     
     # Relationships
-    conversations = relationship("Conversation", back_populates="chat", cascade="all, delete-orphan")
-    embeddings = relationship("Embedding", back_populates="chat")
+    message = relationship("Message", back_populates="chat", cascade="all, delete-orphan")
+    embedding = relationship("Embedding", back_populates="chat")
 
     def __str__(self):
         return f"<Chat(id={self.id}, title='{self.title}')>"
@@ -40,20 +40,20 @@ class Chat(Base):
         result = await db_session.execute(query)
         return result.scalars().all()
     
-    async def get_conversations_count(self, db_session) -> int:
-        """Get total number of conversations in this chat"""
+    async def get_messages_count(self, db_session) -> int:
+        """Get total number of messages in this chat"""
         result = await db_session.execute(
-            select(Conversation).where(Conversation.chat_id == self.id)
+            select(Message).where(Message.chat_id == self.id)
         )
         return len(result.scalars().all())
 
-class Conversation(Base):
+class Message(Base):
     """
     Represents a single message within a chat.
     Contains the role (user or assistant), message content, timestamp, and the model used.
     Linked to one chat and optionally related embeddings and memories.
     """
-    __tablename__ = 'conversation'
+    __tablename__ = 'message'
 
     id = Column(Integer, primary_key=True)
     chat_id = Column(Integer, ForeignKey('chat.id'), nullable=False)
@@ -62,18 +62,18 @@ class Conversation(Base):
     message = Column(Text, nullable=False)
     timestamp = Column(DateTime, default=datetime.now)
 
-    chat = relationship("Chat", back_populates="conversations")
-    embedding = relationship("Embedding", back_populates="conversation", uselist=False, cascade="all, delete-orphan")
+    chat = relationship("Chat", back_populates="message")
+    embedding = relationship("Embedding", back_populates="message", uselist=False, cascade="all, delete-orphan")
 
     def __str__(self):
-        return f"<Conversation(id={self.id}, role={self.role}, model={self.model_name}, message='{self.message[:50]}')>"
+        return f"<Message(id={self.id}, role={self.role}, model={self.model_name}, message='{self.message[:50]}')>"
     
     async def get_embedding(self, db_session):
-        """Get the embedding for this conversation"""
+        """Get the embedding for this message"""
         result = await db_session.execute(
             select(Embedding).where(
-                Embedding.content_type == ContentType.CONVERSATION,
-                Embedding.conversation_id == self.id
+                Embedding.content_type == ContentType.MESSAGE,
+                Embedding.message_id == self.id
             )
         )
         return result.scalar_one_or_none()
@@ -85,35 +85,23 @@ class Conversation(Base):
 
 class Embedding(Base):
     """
-    Stores vector embeddings for conversations, searches, and memory.
+    Stores vector embeddings for messages, searches, and memory.
     Generic table that handles all content types.
     """
     __tablename__ = 'embedding'
     
     id = Column(Integer, primary_key=True, autoincrement=True)
     chat_id = Column(Integer, ForeignKey('chat.id'), nullable=True)
-    
-    # Content identification
     content_type = Column(SQLEnum(ContentType), nullable=False)
-    
-    # Here's where the three columns come back
-    conversation_id = Column(Integer, ForeignKey('conversation.id'), nullable=True)
-    
-    # FAISS integration
+    message_id = Column(Integer, ForeignKey('message.id'), nullable=True)
     faiss_id = Column(Integer, nullable=True)
-    
-    # Embedding data  
     embedding_model = Column(String(255), nullable=True)
     vector = Column(JSON, nullable=False)
-    
-    # Timestamps
-    created_at = Column(DateTime, default=datetime.now)
+    timestamp = Column(DateTime, default=datetime.now)
 
     # Relationships
-    chat = relationship("Chat", back_populates="embeddings")
-    
-    # Relationships with cascading deletes from the "parent" objects
-    conversation = relationship("Conversation", back_populates="embedding")
+    chat = relationship("Chat", back_populates="embedding")
+    message = relationship("Message", back_populates="embedding")
     
     def __str__(self):
         return f"<Embedding(id={self.id}, type={self.content_type})>"

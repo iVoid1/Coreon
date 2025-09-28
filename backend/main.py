@@ -23,12 +23,9 @@ async def setup_chat():
     
     # Try to get existing chat or create new one
     print("Setting up chat...")
-    chat = await coreon.db.get_chat(chat_id=1)
-    if chat is None:
-        chat = await coreon.db.create_chat(title="Coreon Chat")
-        logger.info(f"Created new chat: {chat.id}")
-    else:
-        logger.info(f"Using existing chat: {chat.id}")
+
+    chat = await coreon.db.create_chat(title=input("Enter chat title: ").strip() or "New Chat")
+    logger.info(f"Created new chat: {chat.id}")
     
     return coreon, chat
 
@@ -59,7 +56,7 @@ async def chat_loop(coreon: Coreon, chat):
             
             async for response in coreon.chat(
                 chat_id=chat.id,
-                content=user_input,
+                message=user_input,
                 stream=True
             ):
                 print(response.message.content, end="", flush=True) # type: ignore

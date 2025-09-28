@@ -20,6 +20,7 @@ class Coreon:
         ai_model: Optional[Union[str, List[AiModel]]] = None,
         embedding_model: Optional[Union[str, List[AiModel]]] = None,
         dimension: int = 768,
+        auto_create_chat: bool = False,
     ):
         """Initialize Coreon AI Module."""
         
@@ -41,6 +42,9 @@ class Coreon:
         # Conversation data
         self.history: list[dict] = []
         self.conversation_data = []
+        
+        # Chat settings
+        self.auto_create_chat = auto_create_chat
         
         # Logger
         self.logger = setup_logger(__name__)
@@ -134,15 +138,46 @@ class Coreon:
         else:
             raise ValueError("No embedding model available")
 
+    async def validate_chat_id(self, chat_id: int, create_if_not_found: bool = False, title: str = "Auto-created chat") -> Optional[int]:
+        """
+        Validate chat ID.
+
+        Args:
+            chat_id (int): The chat ID to validate.
+            title (str, optional): The title of the chat. Defaults to "Auto-created chat".
+        
+        Returns:
+            Optional[int]: The validated chat ID or None if validation fails.
+        """
+        try:
+            chat_exists = await self.db.get_chat(chat_id)
+            
+            if chat_exists:
+                self.logger.info(f"Chat {chat_id} exists and is valid")
+                return chat_id
+            
+            if self.auto_create_chat or create_if_not_found:
+                self.logger.info(f"Chat {chat_id} not found, creating new chat with title: '{title}'")
+                new_chat = await self.db.create_chat(title=title)
+                self.logger.info(f"Created new chat with ID: {new_chat.id}")
+                return new_chat.id # type: ignore
+            else:
+                self.logger.warning(f"Chat {chat_id} not found and auto_create_chat is disabled")
+                return None
+                
+        except Exception as e:
+            self.logger.error(f"Error validating chat_id {chat_id}: {e}")
+            return None
+
     async def init_database(self):
         """Setup database"""
         await self.db.init_db()
 
-    async def load_conversation(self, chat_id: int):
-        """Load conversation into FAISS index"""
+    async def load_message(self, chat_id: int):
+        """Load messages into FAISS index"""
         self.chat_id = chat_id
-        self.conversation_data = await self.db.get_conversation(chat_id=chat_id)
-        self.logger.info(f"Conversation loaded for chat {chat_id}")
+        self.conversation_data = await self.db.get_message(chat_id=chat_id)
+        self.logger.info(f"Messages loaded for chat {chat_id}")
         
         self.faiss_index = faiss.IndexFlatL2(self.dimension)
         await self.load_vectors(chat_id=chat_id)
@@ -179,8 +214,8 @@ class Coreon:
         """Search memory using FAISS"""
         
         if self.faiss_index is None or self.faiss_index.ntotal == 0:
-            self.logger.warning("FAISS index empty, loading conversation...")
-            await self.load_conversation(chat_id)
+            self.logger.warning("FAISS index empty, loading message...")
+            await self.load_message(chat_id)
         
         try:
             # Use specified model or main model
@@ -225,7 +260,7 @@ class Coreon:
         else:
             self.logger.warning("No content provided for search_relevant")
 
-    async def add_index(self, embed: list, message: Chat):
+    async def add_index(self, embed: list, message):
         """Add new message to FAISS index"""
         embedding_array = np.array([embed], dtype=np.float32)
         faiss.normalize_L2(embedding_array)
@@ -258,8 +293,8 @@ class Coreon:
         embedding_vector = await self.embed_models[embed_model_name].embed_text(content)
         embedding = await self.db.save_embedding(
             chat_id=chat_id,
-            content_type=ContentType.CONVERSATION,
-            conversation_id=message.id, # type: ignore
+            content_type=ContentType.MESSAGE,
+            message_id=message.id, # type: ignore
             embedding_model=embed_model_name,
             vector=embedding_vector
         )
@@ -268,7 +303,7 @@ class Coreon:
         await self.add_index(embedding.vector, message) # type: ignore
         return message, embedding
 
-    async def save_conversation(
+    async def save_messages(
         self,
         chat_id: int,
         user_content: str,
@@ -298,71 +333,9 @@ class Coreon:
                 ai_model=ai_model,
                 embed_model=embed_model
             )
-            self.logger.info(f"Conversation saved for chat {chat_id}")
+            self.logger.info(f"Messages saved for chat {chat_id}")
         else:
             self.logger.error(f"No AI content to save for chat {chat_id}")
-    
-    
-    async def chat(
-        self,
-        content: str,
-        ai_model: Optional[str] = None,
-        embed_model: Optional[str] = None,
-        stream: bool = False,
-        k: int = 5,
-        chat_id: Optional[int] = None,
-        user_role: str = "user",
-        assistant_role: str = "assistant"
-    ):
-        """Chat with AI - simplified and flexible"""
-        if chat_id is None:
-            self.logger.warning("No chat_id provided, cannot load conversation")
-            self.history = [{"role": user_role, "content": content}]
-        else:
-            # Load conversation if not loaded
-            if self.faiss_index is None or self.faiss_index.ntotal == 0:
-                await self.load_conversation(chat_id)
-            
-            # Search for relevant messages
-            distances, indices = await self.search_memory(
-                chat_id=chat_id, 
-                query=content, 
-                embedding_model=embed_model, 
-                k=k
-            )
-            await self.search_relevant(indices, content=content, user_role=user_role)
-
-        # Get model name
-        ai_model_name = self._get_ai_model(ai_model)
-        
-        # Send to AI
-        ai_response = await self.ai_models[ai_model_name].chat(self.history, stream=stream)
-
-        self.logger.info(f"Generated response for chat {chat_id} using {ai_model_name}")
-
-        # Process response
-        if stream:
-            async for message in self._handle_streaming_response(
-                ai_response_stream=ai_response,
-                chat_id=chat_id,
-                user_content=content,
-                ai_model=ai_model_name,
-                embed_model=embed_model,
-                user_role=user_role,
-                assistant_role=assistant_role
-            ):
-                yield message
-        else:
-            result = await self._handle_non_streaming_response(
-                ai_response=ai_response,
-                chat_id=chat_id,
-                user_content=content,
-                ai_model=ai_model_name,
-                embed_model=embed_model,
-                user_role=user_role,
-                assistant_role=assistant_role
-            )
-            yield result
 
     async def embed_text(
         self, 
@@ -372,6 +345,74 @@ class Coreon:
         """Get embedding for text"""
         embed_model_name = self._get_embed_model(embedding_model)
         return await self.embed_models[embed_model_name].embed_text(text)
+    
+    async def chat(
+        self,
+        message: str,
+        ai_model: Optional[str] = None,
+        embed_model: Optional[str] = None,
+        stream: bool = False,
+        k: int = 5,
+        chat_id: Optional[int] = None,
+        user_role: str = "user",
+        assistant_role: str = "assistant"
+    ):
+        """Chat with AI - simplified and flexible"""
+        validated_chat_id = None
+        
+        if chat_id is None:
+            self.logger.info("No chat_id provided, using simple chat mode")
+            self.history = [{"role": user_role, "content": message}]
+        else:
+            validated_chat_id = await self.validate_chat_id(chat_id, title=f"Chat {chat_id}")
+            
+            if validated_chat_id is None:
+                self.logger.warning(f"Chat {chat_id} validation failed, using simple chat mode")
+                self.history = [{"role": user_role, "content": message}]
+            else:
+                # Load messages if not loaded
+                if self.faiss_index is None or self.faiss_index.ntotal == 0:
+                    await self.load_message(validated_chat_id)
+                
+                # Search for relevant messages
+                distances, indices = await self.search_memory(
+                    chat_id=validated_chat_id, 
+                    query=message, 
+                    embedding_model=embed_model, 
+                    k=k
+                )
+                await self.search_relevant(indices, content=message, user_role=user_role)
+
+        # Get model name
+        ai_model_name = self._get_ai_model(ai_model)
+        
+        # Send to AI
+        ai_response = await self.ai_models[ai_model_name].chat(self.history, stream=stream)
+        self.logger.info(f"Generated response for chat {validated_chat_id or 'simple mode'} using {ai_model_name}")
+
+        # Process response
+        if stream:
+            async for response in self._handle_streaming_response(
+                ai_response_stream=ai_response,
+                chat_id=validated_chat_id,
+                user_content=message,
+                ai_model=ai_model_name,
+                embed_model=embed_model,
+                user_role=user_role,
+                assistant_role=assistant_role
+            ):
+                yield response
+        else:
+            result = await self._handle_non_streaming_response(
+                ai_response=ai_response,
+                chat_id=validated_chat_id,
+                user_content=message,
+                ai_model=ai_model_name,
+                embed_model=embed_model,
+                user_role=user_role,
+                assistant_role=assistant_role
+            )
+            yield result
 
     async def _handle_streaming_response(
         self, 
@@ -382,7 +423,7 @@ class Coreon:
         embed_model: Optional[str],
         user_role: str,
         assistant_role: str
-    ):
+    ) -> AsyncIterator[ChatResponse]:
         """Handle streaming response"""
         if isinstance(ai_response_stream, ChatResponse):
             self.logger.error(f"Failed to generate response for chat {chat_id}")
@@ -397,12 +438,12 @@ class Coreon:
             yield streaming_message
         
         if chat_id is None:
-            self.logger.warning("No chat_id provided, cannot save conversation")
+            self.logger.info("No chat_id provided, skipping message save")
             return
         
-        # Save conversation
+        # Save messages
         complete_ai_response = "".join(response_content_parts)
-        await self.save_conversation(
+        await self.save_messages(
             chat_id=chat_id,
             user_content=user_content,
             ai_content=complete_ai_response,
@@ -421,7 +462,7 @@ class Coreon:
         embed_model: Optional[str],
         user_role: str,
         assistant_role: str
-    ):
+    ) -> Optional[ChatResponse]:
         """Handle non-streaming response"""
         if isinstance(ai_response, AsyncIterator):
             self.logger.error(f"Failed to generate response for chat {chat_id}")
@@ -432,12 +473,12 @@ class Coreon:
             
 
         if chat_id is None:
-            self.logger.warning("No chat_id provided, cannot save conversation")
+            self.logger.info("No chat_id provided, skipping message save")
             return ai_response
             
         complete_ai_response = ai_response.message.content
-        # Save conversation
-        await self.save_conversation(
+        # Save messages
+        await self.save_messages(
             chat_id=chat_id,
             user_content=user_content,
             ai_content=complete_ai_response,

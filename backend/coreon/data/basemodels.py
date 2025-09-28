@@ -11,22 +11,21 @@ class ContentType(str, Enum):
 
 # Chat Model
 class ChatBase(BaseModel):
-    id: int
+    id: Optional[int] = None
     title: str = "Untitled chat"
-    created_at: datetime
-    last_active_at: datetime
+    created_at: Optional[datetime] = Field(default_factory=datetime.now)
+    last_active_at: Optional[datetime] = Field(default_factory=datetime.now)
 
     class Config:
         from_attributes = True
 
 # Conversation Model
-class ConversationBase(BaseModel):
-    id: int
-    chat_id: int
+class MessageBase(BaseModel):
+    chat_id: Optional[int] = None
     model_name: Optional[str] = None
+    content: str
     role: str
-    message: str
-    timestamp: datetime
+    timestamp: Optional[datetime] = Field(default_factory=datetime.now)
 
     class Config:
         from_attributes = True
