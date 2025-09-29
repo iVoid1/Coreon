@@ -58,7 +58,7 @@ async def get_chat(chat_id: int):
 async def get_message(chat_id: int):
     """Get all messages for a chat"""
     try:
-        messages = await coreon.db.get_message(chat_id)
+        messages = await coreon.db.get_messages(chat_id)
         logger.info(f"Retrieved messages for chat {chat_id}")
         response = [MessageBase.model_validate(conv) for conv in messages]
         return response
@@ -90,21 +90,19 @@ async def delete_chat(chat_id: int):
 @router.post("/chats/{chat_id}/response", response_class=StreamingResponse)
 async def stream_response(chat_id, message: MessageBase):
     # Validation
-    if not message.content.strip():
-        raise HTTPException(status_code=400, detail="Message is required")
-    
+    message = MessageBase.model_validate(message)
     async def response_generator():
-        yield json.dumps({'type': 'user_message', 'content': message.content, 'role': 'user'})
+        yield json.dumps({'type': 'user_message', 'content': message.content, 'role': 'user'})+"\n"
         
         async for item in coreon.chat(
             chat_id=chat_id,
-            message=message.content,
+            content=message.content,
             user_role=message.role,
             stream=True
         ):
             if item and item.message.content:
-                logger.info(f"Streaming response: {item.message.content}")
-                yield json.dumps({'type': 'ai_chunk', 'content': item.message.content})
+                # logger.info(f"Streaming response: {item.message.content}")
+                yield json.dumps({'type': 'ai_chunk', 'content': item.message.content})+"\n"
         
         yield json.dumps({'type': 'done', 'content': ''})
     

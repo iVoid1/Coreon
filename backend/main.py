@@ -56,7 +56,7 @@ async def chat_loop(coreon: Coreon, chat):
             
             async for response in coreon.chat(
                 chat_id=chat.id,
-                message=user_input,
+                content=user_input,
                 stream=True
             ):
                 print(response.message.content, end="", flush=True) # type: ignore

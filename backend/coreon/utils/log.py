@@ -24,7 +24,7 @@ def setup_logger(name: str, level: int = logging.DEBUG) -> logging.Logger:
     logger.addHandler(handler)
     
     logger.setLevel(level)
-    handler.setLevel(level)  # مهم! الـ handler كمان لازم يكون نفس المستوى
+    handler.setLevel(level)
    
     return logger
 

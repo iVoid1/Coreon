@@ -4,7 +4,7 @@ from ollama import ChatResponse
 from typing import Optional, AsyncIterator, Union, List
 
 from coreon.data import Database
-from coreon.data import Chat, ContentType
+from coreon.data import Message, ContentType
 from coreon.Ai import AiModel
 from coreon.utils import setup_logger
 
@@ -175,8 +175,13 @@ class Coreon:
 
     async def load_message(self, chat_id: int):
         """Load messages into FAISS index"""
-        self.chat_id = chat_id
-        self.conversation_data = await self.db.get_message(chat_id=chat_id)
+        validate_chat_id = await self.validate_chat_id(chat_id=chat_id)
+        
+        if validate_chat_id is None:
+            self.logger.warning(f"Chat {chat_id} validation failed")
+            return
+        self.chat_id = validate_chat_id
+        self.conversation_data = await self.db.get_messages(chat_id=chat_id)
         self.logger.info(f"Messages loaded for chat {chat_id}")
         
         self.faiss_index = faiss.IndexFlatL2(self.dimension)
@@ -206,16 +211,23 @@ class Coreon:
 
     async def search_memory(
         self, 
-        chat_id: int, 
         query: str, 
+        chat_id: Optional[int] = None, 
         embedding_model: Optional[str] = None, 
         k: int = 5
     ):
         """Search memory using FAISS"""
         
-        if self.faiss_index is None or self.faiss_index.ntotal == 0:
-            self.logger.warning("FAISS index empty, loading message...")
-            await self.load_message(chat_id)
+        if chat_id is None:
+            self.logger.info("No chat_id provided, using simple chat mode")
+            return np.array([[]]), np.array([[]])
+        else:
+            # Load messages if not loaded
+            if (self.faiss_index is None 
+                or self.faiss_index.ntotal == 0 
+                or self.chat_id != chat_id
+                ):
+                await self.load_message(chat_id=chat_id)
         
         try:
             # Use specified model or main model
@@ -247,11 +259,11 @@ class Coreon:
         for idx in indices[0]:
             idx: int
             if 0 <= idx < len(self.conversation_data):
-                message = self.conversation_data[idx]
+                message_obj = self.conversation_data[idx]
                 self.history.append({
-                    "role": message.role,
-                    "content": message.message
-                })
+                    "role": message_obj.role,
+                    "content": message_obj.content
+})
 
         # Add new message
         if content:
@@ -260,12 +272,12 @@ class Coreon:
         else:
             self.logger.warning("No content provided for search_relevant")
 
-    async def add_index(self, embed: list, message):
+    async def add_index(self, embed: list, message_obj: Message):
         """Add new message to FAISS index"""
         embedding_array = np.array([embed], dtype=np.float32)
         faiss.normalize_L2(embedding_array)
         self.faiss_index.add(embedding_array) # type: ignore
-        self.conversation_data.append(message)
+        self.conversation_data.append(message_obj)
 
     async def _save_message(
         self, 
@@ -285,7 +297,7 @@ class Coreon:
         message = await self.db.save_message(
             chat_id=chat_id, 
             role=role,
-            message=content, 
+            content=content, 
             model_name=ai_model_name
         )
         
@@ -348,7 +360,7 @@ class Coreon:
     
     async def chat(
         self,
-        message: str,
+        content: str,
         ai_model: Optional[str] = None,
         embed_model: Optional[str] = None,
         stream: bool = False,
@@ -358,44 +370,33 @@ class Coreon:
         assistant_role: str = "assistant"
     ):
         """Chat with AI - simplified and flexible"""
-        validated_chat_id = None
         
         if chat_id is None:
             self.logger.info("No chat_id provided, using simple chat mode")
-            self.history = [{"role": user_role, "content": message}]
+            self.history = [{"role": user_role, "content": content}]
         else:
-            validated_chat_id = await self.validate_chat_id(chat_id, title=f"Chat {chat_id}")
-            
-            if validated_chat_id is None:
-                self.logger.warning(f"Chat {chat_id} validation failed, using simple chat mode")
-                self.history = [{"role": user_role, "content": message}]
-            else:
-                # Load messages if not loaded
-                if self.faiss_index is None or self.faiss_index.ntotal == 0:
-                    await self.load_message(validated_chat_id)
-                
-                # Search for relevant messages
-                distances, indices = await self.search_memory(
-                    chat_id=validated_chat_id, 
-                    query=message, 
-                    embedding_model=embed_model, 
-                    k=k
-                )
-                await self.search_relevant(indices, content=message, user_role=user_role)
+            # Search for relevant messages
+            distances, indices = await self.search_memory(
+                chat_id=chat_id, 
+                query=content, 
+                embedding_model=embed_model, 
+                k=k
+            )
+            await self.search_relevant(indices, content=content, user_role=user_role)
 
         # Get model name
         ai_model_name = self._get_ai_model(ai_model)
         
         # Send to AI
         ai_response = await self.ai_models[ai_model_name].chat(self.history, stream=stream)
-        self.logger.info(f"Generated response for chat {validated_chat_id or 'simple mode'} using {ai_model_name}")
+        self.logger.info(f"Generated response for chat {chat_id or 'simple mode'} using {ai_model_name}")
 
         # Process response
         if stream:
             async for response in self._handle_streaming_response(
                 ai_response_stream=ai_response,
-                chat_id=validated_chat_id,
-                user_content=message,
+                chat_id=chat_id,
+                user_content=content,
                 ai_model=ai_model_name,
                 embed_model=embed_model,
                 user_role=user_role,
@@ -405,8 +406,8 @@ class Coreon:
         else:
             result = await self._handle_non_streaming_response(
                 ai_response=ai_response,
-                chat_id=validated_chat_id,
-                user_content=message,
+                chat_id=chat_id,
+                user_content=content,
                 ai_model=ai_model_name,
                 embed_model=embed_model,
                 user_role=user_role,

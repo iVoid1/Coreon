@@ -21,6 +21,7 @@ class ChatBase(BaseModel):
 
 # Conversation Model
 class MessageBase(BaseModel):
+    id: Optional[int] = None
     chat_id: Optional[int] = None
     model_name: Optional[str] = None
     content: str

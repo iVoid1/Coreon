@@ -196,14 +196,14 @@ class Database:
         self,
         chat_id: int,
         role: str,
-        message: str,
+        content: str,
         model_name: Optional[str] = "assistant"
     ) -> Message:
-        """Save a Message message to the database.
+        """Save a Message content to the database.
         
         :param chat_id: ID of the chat.
         :param role: Role of the message (user or assistant).
-        :param message: Content of the message.
+        :param content: Content of the message.
         :param model_name: Name of the model used for the message.
         """
         await self.ensure_initialized()
@@ -211,7 +211,7 @@ class Database:
             message_obj = Message(
                 chat_id=chat_id,
                 role=role,
-                message=message,
+                content=content,
                 model_name=model_name
             )
             await self.insert(message_obj)
@@ -221,7 +221,7 @@ class Database:
             self.logger.error(f"Failed to save message: {e}")
             raise e
 
-    async def get_message(self, chat_id: int) -> List[Message]:
+    async def get_messages(self, chat_id: int) -> List[Message]:
         """
         Get Message history for a chat.
         Retrieves all messages in the chat ordered by timestamp.

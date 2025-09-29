@@ -77,8 +77,9 @@ function MainPage({ selectedChat }: MainPageProps) {
                 if (done) break;
 
                 const chunk = new TextDecoder().decode(value);
-                const lines = chunk.split('\n');
-
+                console.log('Received chunk:', chunk);
+                const lines = chunk.split('\n').filter(line => line.trim());
+                console.log('Received lines:', lines);
                 for (const line of lines) {
                     try {
                         const data = JSON.parse(line);

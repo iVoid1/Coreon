@@ -59,14 +59,14 @@ class Message(Base):
     chat_id = Column(Integer, ForeignKey('chat.id'), nullable=False)
     model_name = Column(String(255), nullable=True)
     role = Column(String(255), nullable=False)
-    message = Column(Text, nullable=False)
+    content = Column(Text, nullable=False)
     timestamp = Column(DateTime, default=datetime.now)
 
     chat = relationship("Chat", back_populates="message")
     embedding = relationship("Embedding", back_populates="message", uselist=False, cascade="all, delete-orphan")
 
     def __str__(self):
-        return f"<Message(id={self.id}, role={self.role}, model={self.model_name}, message='{self.message[:50]}')>"
+        return f"<Message(id={self.id}, role={self.role}, model={self.model_name}, message='{self.content[:50]}')>"
     
     async def get_embedding(self, db_session):
         """Get the embedding for this message"""
