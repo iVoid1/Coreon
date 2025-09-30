@@ -6,12 +6,6 @@ from typing import Optional
 
 Base = declarative_base()
 
-class ContentType(Enum):
-    """Valid content types for embeddings"""
-    MESSAGE = "message"
-    SEARCH = "search"
-    MEMORY = "memory"
-
 class Chat(Base):
     """
     Represents a chat.
@@ -32,11 +26,9 @@ class Chat(Base):
     def __str__(self):
         return f"<Chat(id={self.id}, title='{self.title}')>"
     
-    async def get_embeddings(self, db_session, content_type: Optional[ContentType] = None):
+    async def get_embeddings(self, db_session):
         """Get all embeddings for this chat, optionally filtered by content type"""
         query = select(Embedding).where(Embedding.chat_id == self.id)
-        if content_type:
-            query = query.where(Embedding.content_type == content_type)
         result = await db_session.execute(query)
         return result.scalars().all()
     
@@ -72,7 +64,6 @@ class Message(Base):
         """Get the embedding for this message"""
         result = await db_session.execute(
             select(Embedding).where(
-                Embedding.content_type == ContentType.MESSAGE,
                 Embedding.message_id == self.id
             )
         )
@@ -92,7 +83,6 @@ class Embedding(Base):
     
     id = Column(Integer, primary_key=True, autoincrement=True)
     chat_id = Column(Integer, ForeignKey('chat.id'), nullable=True)
-    content_type = Column(SQLEnum(ContentType), nullable=False)
     message_id = Column(Integer, ForeignKey('message.id'), nullable=True)
     faiss_id = Column(Integer, nullable=True)
     embedding_model = Column(String(255), nullable=True)
@@ -104,4 +94,4 @@ class Embedding(Base):
     message = relationship("Message", back_populates="embedding")
     
     def __str__(self):
-        return f"<Embedding(id={self.id}, type={self.content_type})>"
+        return f"<Embedding(id={self.id})>"

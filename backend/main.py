@@ -1,3 +1,4 @@
+from pprint import pprint
 import asyncio
 import sys
 from coreon import Coreon, setup_logger
@@ -13,7 +14,6 @@ async def setup_chat():
     logger.info("Initializing Coreon...")
     
     coreon = Coreon(
-        db="coreon.sqlite", 
         ai_model="gemma3:12b", 
         embedding_model="nomic-embed-text:latest"
     )
@@ -24,12 +24,10 @@ async def setup_chat():
     # Try to get existing chat or create new one
     print("Setting up chat...")
 
-    chat = await coreon.db.create_chat(title=input("Enter chat title: ").strip() or "New Chat")
-    logger.info(f"Created new chat: {chat.id}")
     
-    return coreon, chat
+    return coreon
 
-async def chat_loop(coreon: Coreon, chat):
+async def chat_loop(coreon: Coreon):
     """Main chat interaction loop."""
     print("Chat with Coreon (type 'exit' to quit, 'clear' to clear screen)")
     
@@ -55,13 +53,14 @@ async def chat_loop(coreon: Coreon, chat):
             print("Coreon: ", end="", flush=True)
             
             async for response in coreon.chat(
-                chat_id=chat.id,
                 content=user_input,
                 stream=True
             ):
+                if not response:
+                    continue
                 print(response.message.content, end="", flush=True) # type: ignore
             
-            print()  # New line after response
+            print(coreon.__dict__)  # New line after response
             
         except KeyboardInterrupt:
             print("\n\nChat interrupted. Goodbye!")
@@ -70,22 +69,19 @@ async def chat_loop(coreon: Coreon, chat):
         except Exception as e:
             logger.error(f"Error during chat: {e}")
             print(f"\nSorry, there was an error: {e}")
-            continue
+            raise e
 
 async def main():
     """Main application entry point."""
     try:
-        coreon, chat = await setup_chat()
-        await chat_loop(coreon, chat)
+        coreon = await setup_chat()
+        await chat_loop(coreon)
         
     except Exception as e:
         logger.error(f"Failed to start application: {e}")
         print(f"Error: {e}")
-        sys.exit(1)
+        raise e
     
-    finally:
-        logger.info("Application shutting down")
-
 if __name__ == "__main__":
     try:
         asyncio.run(main())

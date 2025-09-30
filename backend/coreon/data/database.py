@@ -3,7 +3,7 @@ from sqlalchemy import event, select
 from contextlib import asynccontextmanager
 from typing import Union, Optional, List
 
-from coreon.data import Base, Chat, Message, Embedding, ContentType
+from coreon.data import Base, Chat, Message, Embedding
 from coreon.utils import setup_logger
 
 class Database:
@@ -291,7 +291,6 @@ class Database:
     async def save_embedding(
         self, 
         chat_id: int,
-        content_type: ContentType,
         message_id: int,
         embedding_model: str,
         vector,
@@ -312,14 +311,13 @@ class Database:
         try:
             embedding = Embedding(
                 chat_id=chat_id,
-                content_type=content_type,
                 message_id=message_id,
                 embedding_model=embedding_model,
                 vector=vector,
                 faiss_id=faiss_id
             )
             await self.insert(embedding)
-            self.logger.debug(f"Inserted embedding for {content_type.value} {message_id}")
+            self.logger.debug(f"Inserted embedding for {message_id}")
             return embedding
         except Exception as e:
             self.logger.error(f"Failed to insert embedding: {e}")
