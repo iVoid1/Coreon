@@ -1,7 +1,9 @@
 sqlalchemy
 ollama
 rich
-faiss
+faiss-cpu
 numpy
 logging
 contextlib
+slowapi
+fastapi
