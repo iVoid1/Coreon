@@ -4,7 +4,6 @@ __pycache__/
 *.db
 *.sqlite
 test*
-*.json
 *vosk*
 # Logs
 logs
