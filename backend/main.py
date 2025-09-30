@@ -15,7 +15,8 @@ async def setup_chat():
     
     coreon = Coreon(
         ai_model="gemma3:12b", 
-        embedding_model="nomic-embed-text:latest"
+        embedding_model="nomic-embed-text:latest",
+        db="coreon.db"
     )
     
     await coreon.init_database()
@@ -53,6 +54,7 @@ async def chat_loop(coreon: Coreon):
             print("Coreon: ", end="", flush=True)
             
             async for response in coreon.chat(
+                chat_id=1,
                 content=user_input,
                 stream=True
             ):

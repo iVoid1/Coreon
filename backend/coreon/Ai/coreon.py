@@ -266,6 +266,8 @@ class Coreon:
         message = None
         embedding = None
         
+        chat_id = await self.validate_chat_id(chat_id=chat_id, create_if_not_found=True)
+        
         # 2. Try to Save message/embedding to DB (Persistent Logic)
         if (not self.memory_mode) and (self.db is not None) and (chat_id is not None):
             # Save message
