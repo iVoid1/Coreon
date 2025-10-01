@@ -3,7 +3,7 @@ import numpy as np
 from ollama import ChatResponse
 from typing import Optional, AsyncIterator, Union, List
 from collections import deque
-
+from rich import print
 from coreon.data import Message
 from coreon.Ai import AiModel
 from coreon.utils import setup_logger
@@ -107,10 +107,22 @@ class Coreon:
         else:
             raise ValueError("No embedding model available")
     
-    #---------------------------
-    #--- Function with faiss ---
-    #---------------------------
+    #-------------------------------
+    #--- Memory Search Functions ---
+    #-------------------------------
     
+    
+    async def save_memory(self, content: str, embedding, role: str):
+        """Save message to memory"""
+        message = Message(content=content, role=role)
+        self.messages.append(message)
+        
+        embedding_array = np.array([embedding], dtype=np.float32)
+        faiss.normalize_L2(embedding_array)
+        self.faiss_index.add(embedding_array) # type: ignore
+        
+        self.embeddings = np.append(self.embeddings, embedding_array)
+        
     async def search_memory(
         self, 
         query: str, 
@@ -128,6 +140,8 @@ class Coreon:
             faiss.normalize_L2(query_array)
 
             distances, indices = self.faiss_index.search(query_array, k=k) # type: ignore
+            print(indices)
+            print(self.faiss_index.ntotal)
             self.logger.info(f"Found {len(indices[0])} relevant messages")
             return indices, distances
  
@@ -144,12 +158,12 @@ class Coreon:
             if content:
                 self.history.append({"role": user_role, "content": content})
             return
-
         # Add relevant messages
         for idx in indices[0]:
             idx: int
             if 0 <= idx < len(self.messages):
                 message_obj = self.messages[idx]
+                self.logger.info(f"Found relevant message: {message_obj}")
                 self.history.append({
                     "role": message_obj.role,
                     "content": message_obj.content
@@ -163,12 +177,6 @@ class Coreon:
         else:
             self.logger.warning("No content provided for search_relevant")
 
-    async def add_index(self, embed: list, message_obj: Message):
-        """Add new message to FAISS index"""
-        embedding_array = np.array([embed], dtype=np.float32)
-        faiss.normalize_L2(embedding_array)
-        self.faiss_index.add(embedding_array) # type: ignore
-        self.messages.append(message_obj)
 
     #---------------------------------------------
     #--- Function for interacting with AiModel ---
@@ -219,13 +227,30 @@ class Coreon:
         
         # Send to AI
         ai_response = await self.ai_models[ai_model_name].chat(self.history, stream=stream)
-
+        complete_response = []
+        
         # Process response
         if stream:
             async for response in self._stream_response(ai_response_stream=ai_response):
                 yield response
-        else:
+                complete_response.append(response.message.content)
+                
+        elif isinstance(ai_response, ChatResponse):
             yield ai_response
+            
+        # Save user message to memory
+        await self.save_memory(
+            content=content, 
+            embedding=await self.embed_text(text=content, embedding_model=embed_model),
+            role=user_role
+        )
+        await self.save_memory(
+            content="".join(complete_response), 
+            embedding=await self.embed_text(text="".join(complete_response), embedding_model=embed_model),
+            role="assistant"
+        )
+        
+        print(self.__dict__)
 
     async def _stream_response(self, ai_response_stream: Union[AsyncIterator[ChatResponse], ChatResponse]) -> AsyncIterator[ChatResponse]:
         """Handle streaming response"""
