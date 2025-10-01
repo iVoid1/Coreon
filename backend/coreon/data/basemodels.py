@@ -1,13 +1,8 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-# Represents the valid content types
-class ContentType(str, Enum):
-    CONVERSATION = "conversation"
-    SEARCH = "search"
-    MEMORY = "memory"
 
 # Chat Model
 class ChatBase(BaseModel):
@@ -22,25 +17,36 @@ class ChatBase(BaseModel):
 # Conversation Model
 class MessageBase(BaseModel):
     id: Optional[int] = None
-    chat_id: Optional[int] = None
     model_name: Optional[str] = None
     content: str
     role: str
     timestamp: Optional[datetime] = Field(default_factory=datetime.now)
 
     class Config:
-        from_attributes = True
+        from_attributes = True        
+        
+class ChatCreate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+    
+    @field_validator('title')
+    def title_not_empty(cls, v):
+        if not v.strip():
+            raise ValueError('Title cannot be empty or whitespace')
+        return v.strip()
 
-# Embedding Model
-class EmbeddingBase(BaseModel):
-    id: int
-    chat_id: Optional[int] = None
-    content_type: ContentType
-    conversation_id: Optional[int] = None
-    faiss_id: Optional[int] = None
-    embedding_model: Optional[str] = None
-    vector: list
-    created_at: datetime
 
-    class Config:
-        from_attributes = True
+class MessageCreate(BaseModel):
+    content: str = Field(..., min_length=1, max_length=10000)
+    role: str = Field(default="user", pattern="^(user|assistant)$")
+    
+    @field_validator('content')
+    def content_not_empty(cls, v):
+        if not v.strip():
+            raise ValueError('Content cannot be empty')
+        return v.strip()
+
+
+class ErrorResponse(BaseModel):
+    detail: str
+    timestamp: datetime = Field(default_factory=datetime.now)
+    status_code: int
