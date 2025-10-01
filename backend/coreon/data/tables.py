@@ -11,6 +11,11 @@ class Chat(Base):
     Represents a chat.
     Stores metadata such as the chat title, creation time, and last activity timestamp.
     Has one-to-many relationships with conversations and search tied to this chat.
+    Args:
+        id (int): The ID of the chat.
+        title (str): The title of the chat.
+        created_at (datetime): The creation time of the chat.
+        last_active_at (datetime): The last activity time of the chat.
     """
     __tablename__ = 'chat'
 
@@ -44,6 +49,13 @@ class Message(Base):
     Represents a single message within a chat.
     Contains the role (user or assistant), message content, timestamp, and the model used.
     Linked to one chat and optionally related embeddings and memories.
+    Args:
+        id (int): The ID of the message.
+        chat_id (int): The ID of the chat the message belongs to.
+        model_name (str): The name of the model used for the message.
+        role (str): The role of the message (user or assistant).
+        content (str): The content of the message.
+        timestamp (datetime): The timestamp when the message was sent.
     """
     __tablename__ = 'message'
 
@@ -78,6 +90,12 @@ class Embedding(Base):
     """
     Stores vector embeddings for messages, searches, and memory.
     Generic table that handles all content types.
+    Args:
+        id (int): The ID of the embedding.
+        chat_id (int): The ID of the chat the embedding belongs to.
+        message_id (int): The ID of the message the embedding belongs to.
+        model_name (str): The name of the model used for the embedding.
+        vector (list): The embedding vector.
     """
     __tablename__ = 'embedding'
     

@@ -29,7 +29,7 @@ class AiModel:
             history (list[dict[str, str]]): The conversation history.
             stream (bool): Whether to stream the response or not.
         """
-        if self.model is None:
+        if not self.model:
             self.logger.error("No model selected")
             raise Exception("No model selected")
         
@@ -42,7 +42,7 @@ class AiModel:
     async def embed_text(self, text: str):
         """Generates an embedding for the given text."""
         try:
-            if self.embedding_model is None:
+            if not self.embedding_model:
                 self.logger.error("No embedding model selected")
                 raise Exception("No embedding model selected")
             
